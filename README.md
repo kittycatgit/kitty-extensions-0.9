@@ -4,6 +4,8 @@ Paperback 0.9 extensions I maintain.
 
 ## Available Extensions
 
+- [DankeFursLesen](https://danke.moe)
+- [Manga18Club](https://manga18.club)
 - [ManhwaToon](https://www.manhwatoon.me)
 
 ## Installation
@@ -34,8 +36,8 @@ Pushing to `main` bundles the extensions and publishes them to GitHub Pages.
 ## Credits
 
 `src/generic` is the shared Madara implementation from
-[Inkdex](https://github.com/inkdex/madara-extensions), used unmodified under the
-GPL-3.0. The extensions in this repository are my own.
+[Inkdex](https://github.com/inkdex/madara-extensions), used under the GPL-3.0 and
+relied on by ManhwaToon. The extensions in this repository are my own.
 
 ## License
 
