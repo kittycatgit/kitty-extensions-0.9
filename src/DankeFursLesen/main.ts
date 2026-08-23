@@ -18,7 +18,9 @@ import {
   type SourceManga,
 } from "@paperback/types";
 
+import { DankeSearchForm } from "./forms";
 import {
+  CATEGORIES,
   PAGE_SIZE,
   type DankeSearchMetadata,
   type GuyaAllSeries,
@@ -43,6 +45,8 @@ class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
 
   private index?: { at: number; entries: IndexEntry[] };
 
+  private categories = new Map<string, { at: number; slugs: string[] }>();
+
   async initialise(): Promise<void> {
     this.rateLimiter.registerInterceptor();
   }
@@ -54,6 +58,39 @@ class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
     });
 
     return JSON.parse(Application.arrayBufferToUTF8String(buffer)) as T;
+  }
+
+  /**
+   * Section membership is only expressed in each section's page, so pull the
+   * series slugs out of its markup. Cached for the same window as the index.
+   */
+  private async getCategorySlugs(categoryId: string): Promise<string[]> {
+    const cached = this.categories.get(categoryId);
+    if (cached && Date.now() - cached.at < INDEX_TTL_MS) {
+      return cached.slugs;
+    }
+
+    const category = CATEGORIES.find((entry) => entry.id === categoryId);
+    if (!category) {
+      return [];
+    }
+
+    const [, buffer] = await Application.scheduleRequest({
+      url: `${DOMAIN}${category.path}`,
+      method: "GET",
+    });
+
+    const html = Application.arrayBufferToUTF8String(buffer);
+    const slugs: string[] = [];
+    for (const match of html.matchAll(/\/read\/manga\/([A-Za-z0-9_-]+)/g)) {
+      const slug = match[1];
+      if (slug && !slugs.includes(slug)) {
+        slugs.push(slug);
+      }
+    }
+
+    this.categories.set(categoryId, { at: Date.now(), slugs });
+    return slugs;
   }
 
   /** `/api/get_all_series/` is the only listing endpoint, so cache it. */
@@ -160,20 +197,39 @@ class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
 
     const page = paging?.page ?? 1;
     const title = (query.title ?? "").trim().toLowerCase();
+    const category =
+      paging?.category ?? (query.metadata as DankeSearchMetadata | undefined)?.category;
 
-    // There is no search endpoint, so filter the cached index locally.
-    const matches = (await this.getIndex()).filter(
+    // The site's search box filters its rendered list rather than calling an
+    // endpoint, so do the same over the cached index.
+    let matches = (await this.getIndex()).filter(
       (entry) =>
-        !title || entry.displayTitle.toLowerCase().includes(title) || entry.slug.includes(title),
+        !title ||
+        entry.displayTitle.toLowerCase().includes(title) ||
+        entry.slug.includes(title) ||
+        entry.author.toLowerCase().includes(title) ||
+        entry.artist.toLowerCase().includes(title),
     );
+
+    if (category) {
+      const slugs = await this.getCategorySlugs(category);
+      matches = matches.filter((entry) => slugs.includes(entry.slug));
+    }
 
     const start = (page - 1) * PAGE_SIZE;
     const slice = matches.slice(start, start + PAGE_SIZE);
 
-    return {
-      items: slice.map((entry) => this.toSearchResult(entry)),
-      metadata: start + slice.length < matches.length ? { page: page + 1 } : { completed: true },
-    };
+    const next: DankeSearchMetadata =
+      start + slice.length < matches.length ? { page: page + 1 } : { completed: true };
+    if (category && next.page) {
+      next.category = category;
+    }
+
+    return { items: slice.map((entry) => this.toSearchResult(entry)), metadata: next };
+  }
+
+  async getAdvancedSearchForm(query: SearchQuery<Metadata>): Promise<DankeSearchForm> {
+    return new DankeSearchForm(query.metadata as DankeSearchMetadata | undefined);
   }
 
   async getSortingOptions(): Promise<SortingOption[]> {
@@ -186,7 +242,12 @@ class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
   async getDiscoverSections(): Promise<DiscoverSection[]> {
     return [
       { id: "latest", title: "Latest Updates", type: DiscoverSectionType.simpleCarousel },
-      { id: "alphabet", title: "All Series", type: DiscoverSectionType.simpleCarousel },
+      ...CATEGORIES.map((category) => ({
+        id: category.id,
+        title: category.title,
+        type: DiscoverSectionType.simpleCarousel,
+      })),
+      { id: "alphabet", title: "All Titles", type: DiscoverSectionType.simpleCarousel },
     ];
   }
 
@@ -200,7 +261,12 @@ class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
     }
 
     const page = paging?.page ?? 1;
-    const entries = [...(await this.getIndex())];
+    let entries = [...(await this.getIndex())];
+
+    if (CATEGORIES.some((category) => category.id === section.id)) {
+      const slugs = await this.getCategorySlugs(section.id);
+      entries = entries.filter((entry) => slugs.includes(entry.slug));
+    }
 
     if (section.id === "latest") {
       entries.sort((a, b) => b.last_updated - a.last_updated);

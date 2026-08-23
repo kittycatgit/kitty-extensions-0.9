@@ -41,7 +41,19 @@ export type GuyaSeries = {
 
 export type DankeSearchMetadata = {
   page?: number;
+  category?: string;
   completed?: boolean;
 };
+
+/**
+ * The site groups titles into sections in its navigation. There is no API for
+ * them - `/api/get_all_series/` ignores any trailing segment and always returns
+ * every title - so membership is read from each section's page.
+ */
+export const CATEGORIES: { id: string; title: string; path: string }[] = [
+  { id: "series", title: "Series", path: "/series/" },
+  { id: "oneshots", title: "Oneshots", path: "/oneshots/" },
+  { id: "nsfw", title: "NSFW", path: "/nsfw/" },
+];
 
 export const PAGE_SIZE = 40;
