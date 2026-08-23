@@ -9,7 +9,14 @@ let pbConfig = basePbConfig;
 
 pbConfig.name = "ManhwaToon";
 pbConfig.description = "Extension that pulls content from manhwatoon.me.";
-pbConfig.version = "1.0.0";
+pbConfig.version = "1.0.1";
 pbConfig.contentRating = ContentRating.ADULT;
+pbConfig.developers = [
+  {
+    name: "kittycatgit",
+    website: "https://github.com/kittycatgit",
+    github: "https://github.com/kittycatgit",
+  },
+];
 
 export default pbConfig;
