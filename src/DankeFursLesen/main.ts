@@ -16,6 +16,7 @@ import {
   type SearchResultItem,
   type SortingOption,
   type SourceManga,
+  type Tag,
 } from "@paperback/types";
 
 import { DankeSearchForm } from "./forms";
@@ -111,15 +112,35 @@ class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
   }
 
   private toSearchResult(entry: IndexEntry): SearchResultItem {
+    // The index carries no chapter counts, so surface the update date instead
+    // of spending a request per row to fetch them.
+    const subtitle = formatUpdated(entry.last_updated);
+
     return {
       mangaId: entry.slug,
       title: entry.displayTitle,
       imageUrl: entry.cover ? `${DOMAIN}${entry.cover}` : "",
+      ...(subtitle ? { subtitle } : {}),
     };
   }
 
   async getMangaDetails(mangaId: string): Promise<SourceManga> {
     const series = await this.fetchJson<GuyaSeries>(`/api/series/${mangaId}/`);
+
+    const groupTags: Tag[] = Object.entries(series.groups).map(([id, title]) => ({ id, title }));
+
+    const chapterKeys = Object.keys(series.chapters).sort((a, b) => Number(a) - Number(b));
+    const newest = chapterKeys[chapterKeys.length - 1];
+    const additionalInfo: Record<string, string> = {};
+    if (chapterKeys.length > 0) {
+      additionalInfo["Chapters"] = String(chapterKeys.length);
+    }
+    if (newest !== undefined) {
+      const chapter = series.chapters[newest];
+      additionalInfo["Latest"] = chapter?.title
+        ? `Chapter ${newest} - ${chapter.title}`
+        : `Chapter ${newest}`;
+    }
 
     return {
       mangaId,
@@ -132,6 +153,10 @@ class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
         shareUrl: `${DOMAIN}/read/manga/${mangaId}/`,
         ...(series.author ? { author: series.author } : {}),
         ...(series.artist ? { artist: series.artist } : {}),
+        ...(groupTags.length
+          ? { tagGroups: [{ id: "groups", title: "Groups", tags: groupTags }] }
+          : {}),
+        ...(Object.keys(additionalInfo).length ? { additionalInfo } : {}),
       },
     };
   }
@@ -287,6 +312,20 @@ class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
       metadata: start + slice.length < entries.length ? { page: page + 1 } : { completed: true },
     };
   }
+}
+
+/** Epoch seconds to a short, readable update date. */
+function formatUpdated(epochSeconds: number): string {
+  if (!epochSeconds) {
+    return "";
+  }
+
+  const date = new Date(epochSeconds * 1000);
+  if (isNaN(date.getTime())) {
+    return "";
+  }
+
+  return `Updated ${date.toISOString().slice(0, 10)}`;
 }
 
 /** Descriptions are authored as HTML, which the app renders as plain text. */
