@@ -119,12 +119,15 @@ class Manga18ClubExtension implements ExtensionImpl<typeof pbconfig> {
     const items = parseSearchResults($);
     const more = items.length > 0 && hasNextPage($, page);
 
-    return {
-      items,
-      metadata: more
-        ? ({ ...paging, page: page + 1, genre } satisfies Manga18SearchMetadata)
-        : { completed: true },
-    };
+    // Build the continuation metadata without any `undefined` values: it is
+    // serialised as JSON across the bridge, and an explicit undefined member
+    // is not a valid JSON value.
+    const next: Manga18SearchMetadata = more ? { page: page + 1 } : { completed: true };
+    if (more && genre) {
+      next.genre = genre;
+    }
+
+    return { items, metadata: next };
   }
 
   async getDiscoverSections(): Promise<DiscoverSection[]> {
