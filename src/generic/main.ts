@@ -422,13 +422,29 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
     };
   }
 
+  /**
+   * Called by the app once the user has completed the in-app Cloudflare
+   * challenge. This is the current callback; `saveCloudflareBypassCookies`
+   * below is the deprecated form, kept so older app builds still work.
+   */
+  async cloudflareBypassCompleted(
+    _request: Request,
+    cookies: Cookie[],
+    _localStorage: Record<string, string>,
+  ): Promise<void> {
+    this.storeBypassCookies(cookies);
+  }
+
+  /** @deprecated the app now calls {@link cloudflareBypassCompleted}. */
   async saveCloudflareBypassCookies(cookies: Cookie[]): Promise<void> {
+    this.storeBypassCookies(cookies);
+  }
+
+  private storeBypassCookies(cookies: Cookie[]): void {
     for (const cookie of cookies) {
-      if (
-        cookie.name.startsWith("cf") ||
-        cookie.name.startsWith("_cf") ||
-        cookie.name.startsWith("__cf")
-      ) {
+      // `cf_clearance` is what actually carries the bypass, but the site's own
+      // session cookie is usually issued alongside it and is needed too.
+      if (/^(?:__)?_?cf/i.test(cookie.name) || /session|phpsessid/i.test(cookie.name)) {
         this.cookieStorageInterceptor.setCookie(cookie);
       }
     }
