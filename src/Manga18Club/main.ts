@@ -11,7 +11,6 @@ import {
   type DiscoverSection,
   type DiscoverSectionItem,
   type ExtensionImpl,
-  type Form,
   type Metadata,
   type PagedResults,
   type Request,
@@ -55,30 +54,31 @@ class Manga18ClubExtension implements ExtensionImpl<typeof pbconfig> {
     this.interceptor.registerInterceptor();
   }
 
-  private async fetch(url: string): Promise<cheerio.CheerioAPI> {
+  private async fetch(url: string): Promise<{ $: cheerio.CheerioAPI; html: string }> {
     const [, buffer] = await Application.scheduleRequest({ url, method: "GET" });
-    return cheerio.load(Application.arrayBufferToUTF8String(buffer));
+    const html = Application.arrayBufferToUTF8String(buffer);
+    return { $: cheerio.load(html), html };
   }
 
   async getMangaDetails(mangaId: string): Promise<SourceManga> {
-    const $ = await this.fetch(`${DOMAIN}/manhwa/${mangaId}`);
+    const { $ } = await this.fetch(`${DOMAIN}/manhwa/${mangaId}`);
     return parseMangaDetails($, mangaId, DOMAIN);
   }
 
   async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
-    const $ = await this.fetch(`${DOMAIN}/manhwa/${sourceManga.mangaId}`);
+    const { $ } = await this.fetch(`${DOMAIN}/manhwa/${sourceManga.mangaId}`);
     return parseChapters($, sourceManga);
   }
 
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
-    const $ = await this.fetch(
+    const { $, html } = await this.fetch(
       `${DOMAIN}/manhwa/${chapter.sourceManga.mangaId}/${chapter.chapterId}`,
     );
 
     return {
       id: chapter.chapterId,
       mangaId: chapter.sourceManga.mangaId,
-      pages: parseChapterPages($),
+      pages: parseChapterPages($, html),
     };
   }
 
@@ -102,7 +102,7 @@ class Manga18ClubExtension implements ExtensionImpl<typeof pbconfig> {
 
     const page = paging?.page ?? 1;
     const sort = sortingOption?.id ?? DEFAULT_SORT;
-    const title = query.title.trim();
+    const title = (query.title ?? "").trim();
     const genre = (query.metadata as Manga18SearchMetadata | undefined)?.genre;
 
     let url: string;
@@ -115,7 +115,7 @@ class Manga18ClubExtension implements ExtensionImpl<typeof pbconfig> {
       url = `${DOMAIN}/list-manga${page > 1 ? `/${page}` : ""}?order_by=${sort}`;
     }
 
-    const $ = await this.fetch(url);
+    const { $ } = await this.fetch(url);
     const items = parseSearchResults($);
     const more = items.length > 0 && hasNextPage($, page);
 
@@ -155,7 +155,7 @@ class Manga18ClubExtension implements ExtensionImpl<typeof pbconfig> {
     }
 
     const page = paging?.page ?? 1;
-    const $ = await this.fetch(
+    const { $ } = await this.fetch(
       `${DOMAIN}/list-manga${page > 1 ? `/${page}` : ""}?order_by=${section.id}`,
     );
     const items = parseSearchResults($);
@@ -176,10 +176,6 @@ class Manga18ClubExtension implements ExtensionImpl<typeof pbconfig> {
     for (const cookie of cookies) {
       this.cookieStorage.setCookie(cookie);
     }
-  }
-
-  async getSettingsForm(): Promise<Form> {
-    throw new Error("Not implemented");
   }
 }
 

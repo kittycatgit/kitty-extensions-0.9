@@ -145,9 +145,29 @@ export function parseChapters($: CheerioAPI, sourceManga: SourceManga): Chapter[
   return chapters;
 }
 
-export function parseChapterPages($: CheerioAPI): string[] {
+export function parseChapterPages($: CheerioAPI, html: string): string[] {
   const pages: string[] = [];
 
+  // The reader's image URLs are base64 encoded inside an inline script and
+  // decoded client side, so they never appear as plain text or as <img> tags
+  // in the response. Decode them in document order, which is reading order.
+  for (const candidate of html.match(/[A-Za-z0-9+/]{60,}={0,2}/g) ?? []) {
+    const decoded = Application.base64Decode(candidate);
+    if (typeof decoded !== "string") {
+      continue;
+    }
+
+    const url = decoded.trim();
+    if (/\/chapters\/.+\.(?:jpg|jpeg|png|webp)$/i.test(url) && !pages.includes(url)) {
+      pages.push(url);
+    }
+  }
+
+  if (pages.length > 0) {
+    return pages;
+  }
+
+  // Fallback for any chapter served with the images already in the markup.
   for (const element of $("div#chapter_boxImages img, img.image-chapter").toArray()) {
     const source = ($(element).attr("src") ?? $(element).attr("data-src") ?? "").trim();
     if (source && !pages.includes(source)) {
