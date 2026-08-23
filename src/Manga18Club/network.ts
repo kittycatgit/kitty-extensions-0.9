@@ -17,11 +17,21 @@ export class Manga18Interceptor extends PaperbackInterceptor {
   }
 
   override async interceptRequest(request: Request): Promise<Request> {
+    // The site serves chapter images only to requests that look like a real
+    // page navigation. A browser never sends `origin` on a same-origin GET, and
+    // always sends the `sec-fetch-*` set, so mirror that exactly.
     request.headers = {
       ...request.headers,
       "user-agent": await Application.getDefaultUserAgent(),
       referer: `${this.domain}/`,
-      origin: this.domain,
+      accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "accept-language": "en-US,en;q=0.9",
+      "upgrade-insecure-requests": "1",
+      "sec-fetch-dest": "document",
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-site": "same-origin",
+      "sec-fetch-user": "?1",
     };
 
     return request;

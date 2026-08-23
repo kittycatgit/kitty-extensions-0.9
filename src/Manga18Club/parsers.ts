@@ -46,12 +46,19 @@ export function parseSearchResults($: CheerioAPI): SearchResultItem[] {
   return items;
 }
 
-/** True when the listing exposes a page after the one currently loaded. */
+/**
+ * True when the listing exposes a page after the one currently loaded.
+ *
+ * Only pagination links are considered. Series rows link to numbered chapters
+ * (`/manhwa/<slug>/96`), which would otherwise read as page numbers and leave
+ * pagination running forever.
+ */
 export function hasNextPage($: CheerioAPI, currentPage: number): boolean {
-  return $("a[href]")
+  return $("a[href*='/list-manga'], a[href*='/manga-list']")
     .toArray()
     .some((element) => {
-      const match = /\/(\d+)(?:\?|$)/.exec($(element).attr("href") ?? "");
+      const path = ($(element).attr("href") ?? "").split("?")[0] ?? "";
+      const match = /\/(\d+)\/?$/.exec(path);
       return match?.[1] !== undefined && Number(match[1]) > currentPage;
     });
 }
