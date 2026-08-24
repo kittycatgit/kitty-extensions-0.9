@@ -157,14 +157,16 @@ class ScytheScansExtension extends MangaStreamGeneric {
     const $ = cheerio.load(Application.arrayBufferToUTF8String(buffer));
     const manga = this.parser.parseMangaDetails($, mangaId, this);
 
-    // The theme prints its metadata as label/value rows the base does not read.
+    // The theme prints metadata rows as `<div class="imptdt">Label <i>Value</i></div>`
+    // - the label is the row's own text, the value sits in the child element.
+    // There is no colon to split on.
     const rows = new Map<string, string>();
     $("div.tsinfo div.imptdt").each((_, element) => {
-      const text = $(element).text().replace(/\s+/g, " ").trim();
-      const [label, ...rest] = text.split(":");
-      const value = rest.join(":").trim();
+      const row = $(element);
+      const label = row.clone().children().remove().end().text().replace(/\s+/g, " ").trim();
+      const value = row.children().first().text().replace(/\s+/g, " ").trim();
       if (label && value) {
-        rows.set(label.trim().toLowerCase(), value);
+        rows.set(label.toLowerCase(), value);
       }
     });
 
