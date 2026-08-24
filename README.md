@@ -7,6 +7,7 @@ Paperback 0.9 extensions I maintain.
 - [DankeFursLesen](https://danke.moe)
 - [HiperDex](https://hiperdex.tv)
 - [Manga18Club](https://manga18.club)
+- [MangaHub](https://mangahub.io)
 - [ManhwaRead](https://manhwaread.com)
 - [ManhwaToon](https://www.manhwatoon.me)
 - [ScytheScans](https://scythescans.com)
