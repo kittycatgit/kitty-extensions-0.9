@@ -9,7 +9,7 @@ let pbConfig = basePbConfig;
 
 pbConfig.name = "ManhwaToon";
 pbConfig.description = "Extension that pulls content from manhwatoon.me.";
-pbConfig.version = "1.0.2";
+pbConfig.version = "2";
 pbConfig.contentRating = ContentRating.ADULT;
 pbConfig.developers = [
   {

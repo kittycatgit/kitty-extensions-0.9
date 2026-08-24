@@ -20,6 +20,13 @@ https://kittycatgit.github.io/kitty-extensions-0.9/
 Sources marked as adult are hidden unless adult content is enabled in the app's
 settings.
 
+## Versioning
+
+Extensions use a single whole number that goes up by one on every release —
+`1`, `2`, `3`. There is no major/minor/patch split to interpret; a higher
+number is simply newer. Bump it whenever you publish, or the app will not
+offer the update.
+
 ## Development
 
 Requires Node.js 24+.
