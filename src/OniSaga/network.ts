@@ -11,6 +11,9 @@ import {
 import {
   DEFAULT_RETRY_AFTER_MS,
   DOMAIN,
+  INFLIGHT_POLL_MS,
+  INFLIGHT_POLLS,
+  INFLIGHT_TTL_MS,
   MAX_SLOT_LOOKAHEAD_MS,
   PAGE_REQUEST_GAP_MS,
   READER_TOKEN_HEADER,
@@ -37,6 +40,8 @@ const BLOCKED_UNTIL_KEY = "onisaga.blockedUntil";
 const pageKey = (chapterId: string, index: number): string => `onisaga.page.${chapterId}.${index}`;
 const tokenKey = (chapterId: string): string => `onisaga.token.${chapterId}`;
 const ownerKey = (chapterId: string): string => `onisaga.owner.${chapterId}`;
+const inflightKey = (chapterId: string, index: number): string =>
+  `onisaga.inflight.${chapterId}.${index}`;
 
 type CachedUrl = { url: string; at: number };
 type CachedToken = { token: string; at: number };
@@ -81,22 +86,44 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
       return cached.url;
     }
 
-    // Reserve a paced slot. Reading the shared cursor and writing the next one
-    // back happens synchronously before any await, so on a single-threaded
-    // event loop each concurrent request claims a distinct, increasing slot -
-    // serialised pacing without a lock.
-    await this.waitForSlot();
-
-    // Another request may have resolved this same page while we waited.
-    const fresh = Application.getState(key) as CachedUrl | undefined;
-    if (fresh && Date.now() - fresh.at < SIGNED_URL_TTL_MS) {
-      return fresh.url;
+    // The app prefetches each page and asks for it more than once. If another
+    // request is already resolving this exact page, wait for its result rather
+    // than claiming a second paced slot - otherwise duplicates halve the rate.
+    const flag = inflightKey(chapterId, index);
+    const held = Application.getState(flag) as number | undefined;
+    if (held && Date.now() - held < INFLIGHT_TTL_MS) {
+      for (let attempt = 0; attempt < INFLIGHT_POLLS; attempt += 1) {
+        await Application.sleep(INFLIGHT_POLL_MS / 1000);
+        const ready = Application.getState(key) as CachedUrl | undefined;
+        if (ready && Date.now() - ready.at < SIGNED_URL_TTL_MS) {
+          return ready.url;
+        }
+        if (!Application.getState(flag)) {
+          break; // the other attempt finished or failed; resolve it ourselves
+        }
+      }
     }
 
-    const url = await this.mintPage(chapterId, index);
-    Application.setState({ url, at: Date.now() } satisfies CachedUrl, key);
+    Application.setState(Date.now(), flag);
+    try {
+      // Reserve a paced slot. Reading the shared cursor and writing the next
+      // one back happens synchronously before any await, so on a single-
+      // threaded event loop each concurrent request claims a distinct,
+      // increasing slot - serialised pacing without a lock.
+      await this.waitForSlot();
 
-    return url;
+      const fresh = Application.getState(key) as CachedUrl | undefined;
+      if (fresh && Date.now() - fresh.at < SIGNED_URL_TTL_MS) {
+        return fresh.url;
+      }
+
+      const url = await this.mintPage(chapterId, index);
+      Application.setState({ url, at: Date.now() } satisfies CachedUrl, key);
+
+      return url;
+    } finally {
+      Application.setState(undefined, flag);
+    }
   }
 
   /** Claims the next paced slot and waits for it. */

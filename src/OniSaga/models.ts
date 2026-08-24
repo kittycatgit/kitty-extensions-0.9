@@ -73,6 +73,11 @@ export const PAGE_REQUEST_GAP_MS = 1200;
  */
 export const MAX_SLOT_LOOKAHEAD_MS = 30_000;
 
+/** A duplicate request waits this long for the original resolution to appear. */
+export const INFLIGHT_TTL_MS = 15_000;
+export const INFLIGHT_POLL_MS = 150;
+export const INFLIGHT_POLLS = 100;
+
 /** How long a 429 is respected for when the reply carries no Retry-After. */
 export const DEFAULT_RETRY_AFTER_MS = 60_000;
 
