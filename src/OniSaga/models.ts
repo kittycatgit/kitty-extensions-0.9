@@ -62,7 +62,7 @@ export const READER_TOKEN_HEADER = "X-Reader-Token";
  * it: going too fast earns a 429 whose penalty lasts far longer than the time
  * saved. This is the pace the site's own reader keeps.
  */
-export const PAGE_REQUEST_GAP_MS = 1200;
+export const PAGE_REQUEST_GAP_MS = 1500;
 
 /**
  * The furthest ahead the paced-slot cursor is trusted.

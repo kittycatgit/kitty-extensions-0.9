@@ -11,9 +11,6 @@ import {
 import {
   DEFAULT_RETRY_AFTER_MS,
   DOMAIN,
-  INFLIGHT_POLL_MS,
-  INFLIGHT_POLLS,
-  INFLIGHT_TTL_MS,
   MAX_SLOT_LOOKAHEAD_MS,
   PAGE_REQUEST_GAP_MS,
   READER_TOKEN_HEADER,
@@ -25,26 +22,60 @@ import {
 } from "./models";
 
 /**
- * All state lives in `Application.setState`, not in instance fields.
+ * A cross-request lock, module-level so it is shared by every request.
  *
- * Paperback runs each request through the native bridge, and an interceptor's
- * in-memory fields - a promise queue, a Map cache - do not survive from one
- * request to the next. An earlier build kept them in memory, and on device the
- * cache never deduplicated and the pacing never applied: every page resolved
- * twice and the burst tripped the site's rate limit. The state manager is the
- * one store that persists across requests, which is why the app's own cookie
- * interceptor uses it too.
+ * This is the one primitive proven to serialise on Paperback's native bridge:
+ * the shipped BasicRateLimiter uses exactly this (an identical lock lives in
+ * `@paperback/types` but is not re-exported, so it is reproduced here). Holding
+ * it for the whole of a page resolution turns the reader's parallel prefetch
+ * into strictly one-at-a-time, paced calls — which is the only way to stay
+ * under the rate limit, since tripping it escalates to a Cloudflare lockout.
  */
-const NEXT_SLOT_KEY = "onisaga.nextSlot";
+const lockPromises: Record<string, Promise<void> | undefined> = {};
+const lockResolvers: Record<string, (() => void) | undefined> = {};
+
+async function lock(uid: string): Promise<void> {
+  if (lockPromises[uid]) {
+    await lockPromises[uid];
+    await lock(uid);
+    return;
+  }
+
+  lockPromises[uid] = new Promise<void>((resolve) => {
+    lockResolvers[uid] = () => {
+      delete lockPromises[uid];
+      resolve();
+    };
+  });
+}
+
+function unlock(uid: string): void {
+  const resolver = lockResolvers[uid];
+  if (resolver) {
+    delete lockResolvers[uid];
+    resolver();
+  }
+}
+
+const PAGE_LOCK = "onisaga.pageResolve";
+
+/**
+ * How long to stand down after the site escalates to a Cloudflare challenge on
+ * the page API. That only happens once the rate limit is already tripped, and
+ * it clears on its own after a while; hammering it keeps it shut.
+ */
+const CF_COOLDOWN_MS = 90_000;
+
+const LAST_AT_KEY = "onisaga.lastAt";
 const BLOCKED_UNTIL_KEY = "onisaga.blockedUntil";
 const pageKey = (chapterId: string, index: number): string => `onisaga.page.${chapterId}.${index}`;
 const tokenKey = (chapterId: string): string => `onisaga.token.${chapterId}`;
 const ownerKey = (chapterId: string): string => `onisaga.owner.${chapterId}`;
-const inflightKey = (chapterId: string, index: number): string =>
-  `onisaga.inflight.${chapterId}.${index}`;
 
 type CachedUrl = { url: string; at: number };
 type CachedToken = { token: string; at: number };
+
+const isPageApi = (url: string): boolean => /\/api\/chapter\/\d+\/page\/\d+/.test(url);
 
 export class OniSagaInterceptor extends PaperbackInterceptor {
   noteChapterOwner(chapterId: string, mangaId: string): void {
@@ -65,9 +96,7 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
       return request;
     }
 
-    const url = await this.resolvePage(marker.chapterId, marker.index);
-
-    request.url = url;
+    request.url = await this.resolvePage(marker.chapterId, marker.index);
     request.headers = {
       ...request.headers,
       accept: "image/avif,image/webp,image/*,*/*;q=0.8",
@@ -77,86 +106,76 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     return request;
   }
 
-  /** Returns a page's signed URL, cached and paced across every request. */
+  /**
+   * Returns a page's signed URL. Every resolution runs alone under the lock, so
+   * duplicates collapse to a cache hit and calls are strictly paced.
+   */
   private async resolvePage(chapterId: string, index: number): Promise<string> {
     const key = pageKey(chapterId, index);
 
+    // Fast path: a cached URL needs no lock.
     const cached = Application.getState(key) as CachedUrl | undefined;
     if (cached && Date.now() - cached.at < SIGNED_URL_TTL_MS) {
       return cached.url;
     }
 
-    // The app prefetches each page and asks for it more than once. If another
-    // request is already resolving this exact page, wait for its result rather
-    // than claiming a second paced slot - otherwise duplicates halve the rate.
-    const flag = inflightKey(chapterId, index);
-    const held = Application.getState(flag) as number | undefined;
-    if (held && Date.now() - held < INFLIGHT_TTL_MS) {
-      for (let attempt = 0; attempt < INFLIGHT_POLLS; attempt += 1) {
-        await Application.sleep(INFLIGHT_POLL_MS / 1000);
-        const ready = Application.getState(key) as CachedUrl | undefined;
-        if (ready && Date.now() - ready.at < SIGNED_URL_TTL_MS) {
-          return ready.url;
-        }
-        if (!Application.getState(flag)) {
-          break; // the other attempt finished or failed; resolve it ourselves
-        }
-      }
-    }
-
-    Application.setState(Date.now(), flag);
+    await lock(PAGE_LOCK);
     try {
-      // Reserve a paced slot. Reading the shared cursor and writing the next
-      // one back happens synchronously before any await, so on a single-
-      // threaded event loop each concurrent request claims a distinct,
-      // increasing slot - serialised pacing without a lock.
-      await this.waitForSlot();
-
-      const fresh = Application.getState(key) as CachedUrl | undefined;
-      if (fresh && Date.now() - fresh.at < SIGNED_URL_TTL_MS) {
-        return fresh.url;
+      // Another resolution may have produced this exact page while we queued.
+      const again = Application.getState(key) as CachedUrl | undefined;
+      if (again && Date.now() - again.at < SIGNED_URL_TTL_MS) {
+        return again.url;
       }
+
+      await this.pace();
 
       const url = await this.mintPage(chapterId, index);
       Application.setState({ url, at: Date.now() } satisfies CachedUrl, key);
 
       return url;
     } finally {
-      Application.setState(undefined, flag);
+      unlock(PAGE_LOCK);
     }
   }
 
-  /** Claims the next paced slot and waits for it. */
-  private async waitForSlot(): Promise<void> {
+  /** Waits out any cooldown and holds the minimum gap between real calls. */
+  private async pace(): Promise<void> {
     const now = Date.now();
+
     const blockedUntil = (Application.getState(BLOCKED_UNTIL_KEY) as number | undefined) ?? 0;
-    const nextSlot = (Application.getState(NEXT_SLOT_KEY) as number | undefined) ?? 0;
-
-    // Clamp the cursor: a burst that ended mid-way in a previous session could
-    // otherwise leave a reservation minutes in the future and stall this one.
-    const cursor = nextSlot > now + MAX_SLOT_LOOKAHEAD_MS ? now : nextSlot;
-    const slot = Math.max(now, cursor, blockedUntil);
-    Application.setState(slot + PAGE_REQUEST_GAP_MS, NEXT_SLOT_KEY);
-
-    const wait = slot - now;
-    if (wait > 0) {
-      await Application.sleep(wait / 1000);
+    if (blockedUntil > now && blockedUntil < now + MAX_SLOT_LOOKAHEAD_MS + CF_COOLDOWN_MS) {
+      await Application.sleep((blockedUntil - now) / 1000);
     }
+
+    const lastAt = (Application.getState(LAST_AT_KEY) as number | undefined) ?? 0;
+    const since = Date.now() - lastAt;
+    if (since >= 0 && since < PAGE_REQUEST_GAP_MS) {
+      await Application.sleep((PAGE_REQUEST_GAP_MS - since) / 1000);
+    }
+
+    Application.setState(Date.now(), LAST_AT_KEY);
   }
 
-  /** Performs one page resolution, refreshing the token once on a refusal. */
+  /** Performs one page resolution, refreshing the token once on a plain 403. */
   private async mintPage(chapterId: string, index: number): Promise<string> {
     let result = await this.requestPage(chapterId, index, await this.tokenFor(chapterId));
 
-    if (result.status === 403) {
-      // The token expired with the reader page that issued it.
+    if (result.status === 403 && !result.cloudflare) {
+      // A plain 403 means the token expired; a Cloudflare 403 is a lockout and
+      // must not be retried here (it is handled by the cooldown below).
       Application.setState(undefined, tokenKey(chapterId));
-      await this.waitForSlot();
+      await this.pace();
       result = await this.requestPage(chapterId, index, await this.tokenFor(chapterId));
     }
 
     if (result.url) {
       return result.url;
+    }
+
+    if (result.cloudflare) {
+      throw new Error(
+        "The site is throttling this device. Reading will resume on its own shortly.",
+      );
     }
 
     throw new Error(`Unable to resolve page ${index + 1} of chapter ${chapterId}`);
@@ -166,16 +185,23 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     chapterId: string,
     index: number,
     token: string,
-  ): Promise<{ status: number; url?: string }> {
+  ): Promise<{ status: number; url?: string; cloudflare?: boolean }> {
     const [response, buffer] = await Application.scheduleRequest({
       url: pageApiUrl(chapterId, index),
       method: "GET",
       headers: { accept: "application/json", [READER_TOKEN_HEADER]: token, referer: `${DOMAIN}/` },
     });
 
+    // The rate limit escalates to a Cloudflare challenge on the API itself.
+    // Treat it as a hard back-off rather than a challenge the reader can solve.
+    if (response.headers?.["cf-mitigated"] === "challenge") {
+      this.block(CF_COOLDOWN_MS);
+      return { status: response.status, cloudflare: true };
+    }
+
     if (response.status === 429) {
-      this.block(response);
-      throw new Error("Rate limited while resolving a page; it will retry shortly.");
+      this.block(this.retryAfterMs(response));
+      return { status: 429 };
     }
 
     if (response.status !== 200) {
@@ -208,14 +234,16 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     return token;
   }
 
-  /** Records how long the site has asked to be left alone for. */
-  private block(response: Response): void {
+  private retryAfterMs(response: Response): number {
     const header = response.headers?.["retry-after"] ?? response.headers?.["Retry-After"];
     const seconds = header ? Number(header) : Number.NaN;
-    const wait = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : DEFAULT_RETRY_AFTER_MS;
+    return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : DEFAULT_RETRY_AFTER_MS;
+  }
 
+  /** Extends the shared cooldown the pacer waits out. */
+  private block(ms: number): void {
     const current = (Application.getState(BLOCKED_UNTIL_KEY) as number | undefined) ?? 0;
-    Application.setState(Math.max(current, Date.now() + wait), BLOCKED_UNTIL_KEY);
+    Application.setState(Math.max(current, Date.now() + ms), BLOCKED_UNTIL_KEY);
   }
 
   override async interceptResponse(
@@ -223,11 +251,15 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     response: Response,
     data: ArrayBuffer,
   ): Promise<ArrayBuffer> {
-    if (
+    // A challenge on the page API is a throttle, already handled in requestPage
+    // with a cooldown; do not raise the bypass UI for it. Only a challenge on a
+    // normal page (browse, reader) warrants the bypass prompt.
+    const challenged =
       response.headers?.["cf-mitigated"] === "challenge" ||
       (response.status === 403 &&
-        /just a moment|challenge-platform|cf-chl/i.test(Application.arrayBufferToUTF8String(data)))
-    ) {
+        /just a moment|challenge-platform|cf-chl/i.test(Application.arrayBufferToUTF8String(data)));
+
+    if (challenged && !isPageApi(request.url)) {
       throw new CloudflareError(
         {
           url: DOMAIN,
@@ -238,11 +270,10 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
       );
     }
 
-    if (response.status === 429) {
-      this.block(response);
-      throw new Error(
-        "The site is rate limiting this device. Reading will resume automatically in a moment.",
-      );
+    // Page-API statuses (429, Cloudflare 403, token 403) are interpreted by
+    // requestPage from the returned status, so pass them through untouched.
+    if (isPageApi(request.url)) {
+      return data;
     }
 
     if (response.status !== 200) {
