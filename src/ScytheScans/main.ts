@@ -18,37 +18,14 @@ const DOMAIN_NAME: string = "https://scythescans.com";
  * arrives through the site's autoptimize bundles and is handed its sources at
  * runtime, so the list only exists once the page has actually run.
  *
- * This has to be a synchronous expression: the webview evaluates it and takes
- * the completion value, so a promise would come back unresolved.
+ * The inject string is wrapped in a function body, so it must `return` its
+ * value. A promise is awaited, which lets us wait for the reader to populate.
  */
 const READER_SCRIPT = `
-  (function () {
-    try {
-      var images = [];
-      var reader = window.ts_reader;
-      var sources = reader && reader.params && reader.params.sources;
+  return new Promise(function (resolve) {
+    var deadline = Date.now() + 15000;
 
-      if (sources && sources.length) {
-        for (var i = 0; i < sources.length; i++) {
-          var list = sources[i].images || [];
-          for (var j = 0; j < list.length; j++) {
-            if (list[j] && images.indexOf(list[j]) === -1) images.push(list[j]);
-          }
-          if (images.length) break;
-        }
-      }
-
-      if (!images.length) {
-        // Fall back to whatever the reader has already rendered.
-        var rendered = document.querySelectorAll('#readerarea img');
-        for (var k = 0; k < rendered.length; k++) {
-          var src = rendered[k].getAttribute('src') || rendered[k].getAttribute('data-src');
-          if (src && src.indexOf('readerarea.svg') === -1 && images.indexOf(src) === -1) {
-            images.push(src);
-          }
-        }
-      }
-
+    function report(images, sources) {
       return JSON.stringify({
         images: images,
         readerPresent: !!window.ts_reader,
@@ -58,10 +35,45 @@ const READER_SCRIPT = `
         scripts: document.querySelectorAll('script').length,
         readyState: document.readyState,
       });
-    } catch (error) {
-      return JSON.stringify({ images: [], error: String(error) });
     }
-  })()
+
+    function collect() {
+      try {
+        var reader = window.ts_reader;
+        var sources = reader && reader.params && reader.params.sources;
+        var images = [];
+
+        if (sources && sources.length) {
+          for (var i = 0; i < sources.length; i++) {
+            var list = sources[i].images || [];
+            for (var j = 0; j < list.length; j++) {
+              if (list[j] && images.indexOf(list[j]) === -1) images.push(list[j]);
+            }
+            if (images.length) break;
+          }
+        }
+
+        if (!images.length) {
+          // Fall back to whatever the reader has already rendered.
+          var rendered = document.querySelectorAll('#readerarea img');
+          for (var k = 0; k < rendered.length; k++) {
+            var src = rendered[k].getAttribute('src') || rendered[k].getAttribute('data-src');
+            if (src && src.indexOf('readerarea.svg') === -1 && images.indexOf(src) === -1) {
+              images.push(src);
+            }
+          }
+        }
+
+        if (images.length) return resolve(report(images, sources));
+        if (Date.now() > deadline) return resolve(report([], sources));
+        setTimeout(collect, 250);
+      } catch (error) {
+        resolve(JSON.stringify({ images: [], error: String(error) }));
+      }
+    }
+
+    collect();
+  });
 `;
 
 class ScytheScansExtension extends MangaStreamGeneric {
