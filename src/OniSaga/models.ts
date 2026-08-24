@@ -64,6 +64,15 @@ export const READER_TOKEN_HEADER = "X-Reader-Token";
  */
 export const PAGE_REQUEST_GAP_MS = 1200;
 
+/**
+ * The furthest ahead the paced-slot cursor is trusted.
+ *
+ * The cursor lives in persistent state, so a reading session that ends mid
+ * burst can leave it well in the future. Beyond this it is treated as stale
+ * and reset to now, so the next session is never made to wait minutes.
+ */
+export const MAX_SLOT_LOOKAHEAD_MS = 30_000;
+
 /** How long a 429 is respected for when the reply carries no Retry-After. */
 export const DEFAULT_RETRY_AFTER_MS = 60_000;
 

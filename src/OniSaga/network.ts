@@ -11,6 +11,7 @@ import {
 import {
   DEFAULT_RETRY_AFTER_MS,
   DOMAIN,
+  MAX_SLOT_LOOKAHEAD_MS,
   PAGE_REQUEST_GAP_MS,
   READER_TOKEN_HEADER,
   pageApiUrl,
@@ -20,36 +21,29 @@ import {
   TOKEN_TTL_MS,
 } from "./models";
 
-type ChapterToken = { token: string; mangaId: string; at: number };
+/**
+ * All state lives in `Application.setState`, not in instance fields.
+ *
+ * Paperback runs each request through the native bridge, and an interceptor's
+ * in-memory fields - a promise queue, a Map cache - do not survive from one
+ * request to the next. An earlier build kept them in memory, and on device the
+ * cache never deduplicated and the pacing never applied: every page resolved
+ * twice and the burst tripped the site's rate limit. The state manager is the
+ * one store that persists across requests, which is why the app's own cookie
+ * interceptor uses it too.
+ */
+const NEXT_SLOT_KEY = "onisaga.nextSlot";
+const BLOCKED_UNTIL_KEY = "onisaga.blockedUntil";
+const pageKey = (chapterId: string, index: number): string => `onisaga.page.${chapterId}.${index}`;
+const tokenKey = (chapterId: string): string => `onisaga.token.${chapterId}`;
+const ownerKey = (chapterId: string): string => `onisaga.owner.${chapterId}`;
+
+type CachedUrl = { url: string; at: number };
+type CachedToken = { token: string; at: number };
 
 export class OniSagaInterceptor extends PaperbackInterceptor {
-  /** Reader tokens are issued per chapter, so they are cached per chapter. */
-  private readonly tokens = new Map<string, ChapterToken>();
-
-  /**
-   * Resolved page URLs, keyed by "chapterId:index".
-   *
-   * The app prefetches each page and asks for it more than once, so without
-   * this every page was resolved twice - the device logs showed exactly that,
-   * doubling the request rate until the site returned a 429. An in-flight
-   * promise is cached too, so simultaneous requests for the same page share a
-   * single resolution rather than racing into two API calls.
-   */
-  private readonly resolved = new Map<string, { url: string; at: number } | Promise<string>>();
-
-  /** Serialises page resolution; the site refuses to be asked in parallel. */
-  private queue: Promise<unknown> = Promise.resolve();
-
-  private lastPageRequest = 0;
-
-  /** Set while a 429 penalty is being served. */
-  private blockedUntil = 0;
-
-  /** Remembers which series a chapter belongs to, for minting its token. */
-  private readonly chapterOwners = new Map<string, string>();
-
   noteChapterOwner(chapterId: string, mangaId: string): void {
-    this.chapterOwners.set(chapterId, mangaId);
+    Application.setState(mangaId, ownerKey(chapterId));
   }
 
   override async interceptRequest(request: Request): Promise<Request> {
@@ -66,10 +60,9 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
       return request;
     }
 
-    // A placeholder: mint the real, signed URL now that the reader wants it.
-    const resolved = await this.enqueue(() => this.resolvePage(marker.chapterId, marker.index));
+    const url = await this.resolvePage(marker.chapterId, marker.index);
 
-    request.url = resolved;
+    request.url = url;
     request.headers = {
       ...request.headers,
       accept: "image/avif,image/webp,image/*,*/*;q=0.8",
@@ -79,121 +72,60 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     return request;
   }
 
-  override async interceptResponse(
-    request: Request,
-    response: Response,
-    data: ArrayBuffer,
-  ): Promise<ArrayBuffer> {
-    if (
-      response.headers?.["cf-mitigated"] === "challenge" ||
-      (response.status === 403 &&
-        /just a moment|challenge-platform|cf-chl/i.test(Application.arrayBufferToUTF8String(data)))
-    ) {
-      // One resolution URL for every challenge, so concurrent failures collapse
-      // into a single prompt rather than one per request.
-      throw new CloudflareError(
-        {
-          url: DOMAIN,
-          method: "GET",
-          headers: { referer: `${DOMAIN}/`, "user-agent": await Application.getDefaultUserAgent() },
-        },
-        "Bot verification detected, bypass it to continue!",
-      );
+  /** Returns a page's signed URL, cached and paced across every request. */
+  private async resolvePage(chapterId: string, index: number): Promise<string> {
+    const key = pageKey(chapterId, index);
+
+    const cached = Application.getState(key) as CachedUrl | undefined;
+    if (cached && Date.now() - cached.at < SIGNED_URL_TTL_MS) {
+      return cached.url;
     }
 
-    if (response.status === 429) {
-      this.servePenalty(response);
-      throw new Error(
-        "The site is rate limiting this device. Reading will resume automatically in a minute.",
-      );
+    // Reserve a paced slot. Reading the shared cursor and writing the next one
+    // back happens synchronously before any await, so on a single-threaded
+    // event loop each concurrent request claims a distinct, increasing slot -
+    // serialised pacing without a lock.
+    await this.waitForSlot();
+
+    // Another request may have resolved this same page while we waited.
+    const fresh = Application.getState(key) as CachedUrl | undefined;
+    if (fresh && Date.now() - fresh.at < SIGNED_URL_TTL_MS) {
+      return fresh.url;
     }
 
-    if (response.status !== 200) {
-      throw new Error(`Request failed with status ${response.status}: ${request.url}`);
-    }
+    const url = await this.mintPage(chapterId, index);
+    Application.setState({ url, at: Date.now() } satisfies CachedUrl, key);
 
-    return data;
+    return url;
   }
 
-  /** Records how long the site has asked to be left alone for. */
-  private servePenalty(response: Response): void {
-    const header = response.headers?.["retry-after"] ?? response.headers?.["Retry-After"];
-    const seconds = header ? Number(header) : Number.NaN;
-    const wait = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : DEFAULT_RETRY_AFTER_MS;
-
-    this.blockedUntil = Math.max(this.blockedUntil, Date.now() + wait);
-  }
-
-  /** Runs work one at a time, so page resolution is never done in parallel. */
-  private enqueue<T>(work: () => Promise<T>): Promise<T> {
-    const next = this.queue.then(work, work);
-    // Keep the chain alive even when a link rejects.
-    this.queue = next.then(
-      () => undefined,
-      () => undefined,
-    );
-
-    return next;
-  }
-
-  private async pace(): Promise<void> {
+  /** Claims the next paced slot and waits for it. */
+  private async waitForSlot(): Promise<void> {
     const now = Date.now();
+    const blockedUntil = (Application.getState(BLOCKED_UNTIL_KEY) as number | undefined) ?? 0;
+    const nextSlot = (Application.getState(NEXT_SLOT_KEY) as number | undefined) ?? 0;
 
-    if (this.blockedUntil > now) {
-      await Application.sleep((this.blockedUntil - now) / 1000);
-    }
+    // Clamp the cursor: a burst that ended mid-way in a previous session could
+    // otherwise leave a reservation minutes in the future and stall this one.
+    const cursor = nextSlot > now + MAX_SLOT_LOOKAHEAD_MS ? now : nextSlot;
+    const slot = Math.max(now, cursor, blockedUntil);
+    Application.setState(slot + PAGE_REQUEST_GAP_MS, NEXT_SLOT_KEY);
 
-    const since = Date.now() - this.lastPageRequest;
-    if (since < PAGE_REQUEST_GAP_MS) {
-      await Application.sleep((PAGE_REQUEST_GAP_MS - since) / 1000);
+    const wait = slot - now;
+    if (wait > 0) {
+      await Application.sleep(wait / 1000);
     }
   }
 
-  /** Asks the site for one page's signed URL, refreshing the token if refused. */
-  private resolvePage(chapterId: string, index: number): Promise<string> {
-    const key = `${chapterId}:${index}`;
-    const cached = this.resolved.get(key);
-
-    if (cached) {
-      // A settled entry within its lifetime, or a resolution already running.
-      if (cached instanceof Promise) {
-        return cached;
-      }
-
-      if (Date.now() - cached.at < SIGNED_URL_TTL_MS) {
-        return Promise.resolve(cached.url);
-      }
-    }
-
-    const pending = this.mintPage(chapterId, index).then(
-      (url) => {
-        this.resolved.set(key, { url, at: Date.now() });
-        return url;
-      },
-      (error: unknown) => {
-        // A failed attempt must not be cached, or the page can never recover.
-        this.resolved.delete(key);
-        throw error;
-      },
-    );
-
-    this.resolved.set(key, pending);
-    return pending;
-  }
-
-  /** Performs one page resolution, paced, refreshing the token on a refusal. */
+  /** Performs one page resolution, refreshing the token once on a refusal. */
   private async mintPage(chapterId: string, index: number): Promise<string> {
-    await this.pace();
-
-    let token = await this.tokenFor(chapterId);
-    let result = await this.requestPage(chapterId, index, token);
+    let result = await this.requestPage(chapterId, index, await this.tokenFor(chapterId));
 
     if (result.status === 403) {
-      // Tokens expire with the reader page that issued them.
-      this.tokens.delete(chapterId);
-      await this.pace();
-      token = await this.tokenFor(chapterId);
-      result = await this.requestPage(chapterId, index, token);
+      // The token expired with the reader page that issued it.
+      Application.setState(undefined, tokenKey(chapterId));
+      await this.waitForSlot();
+      result = await this.requestPage(chapterId, index, await this.tokenFor(chapterId));
     }
 
     if (result.url) {
@@ -208,22 +140,14 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     index: number,
     token: string,
   ): Promise<{ status: number; url?: string }> {
-    // Measured from the real call, not from pace(): fetching a token between
-    // the two would otherwise let the gap between page requests shrink.
-    this.lastPageRequest = Date.now();
-
     const [response, buffer] = await Application.scheduleRequest({
       url: pageApiUrl(chapterId, index),
       method: "GET",
-      headers: {
-        accept: "application/json",
-        [READER_TOKEN_HEADER]: token,
-        referer: `${DOMAIN}/`,
-      },
+      headers: { accept: "application/json", [READER_TOKEN_HEADER]: token, referer: `${DOMAIN}/` },
     });
 
     if (response.status === 429) {
-      this.servePenalty(response);
+      this.block(response);
       throw new Error("Rate limited while resolving a page; it will retry shortly.");
     }
 
@@ -239,24 +163,66 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     }
   }
 
-  /** Reads a chapter's reader page for the token it embeds. */
+  /** Reads a chapter's reader page for the token it embeds, and caches it. */
   private async tokenFor(chapterId: string): Promise<string> {
-    const cached = this.tokens.get(chapterId);
-
+    const cached = Application.getState(tokenKey(chapterId)) as CachedToken | undefined;
     if (cached && Date.now() - cached.at < TOKEN_TTL_MS) {
       return cached.token;
     }
 
-    const mangaId = this.chapterOwners.get(chapterId);
-
+    const mangaId = Application.getState(ownerKey(chapterId)) as string | undefined;
     if (!mangaId) {
       throw new Error(`No reader page is known for chapter ${chapterId}`);
     }
 
     const token = await readTokenFrom(readerUrl(mangaId, chapterId));
-    this.tokens.set(chapterId, { token, mangaId, at: Date.now() });
+    Application.setState({ token, at: Date.now() } satisfies CachedToken, tokenKey(chapterId));
 
     return token;
+  }
+
+  /** Records how long the site has asked to be left alone for. */
+  private block(response: Response): void {
+    const header = response.headers?.["retry-after"] ?? response.headers?.["Retry-After"];
+    const seconds = header ? Number(header) : Number.NaN;
+    const wait = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : DEFAULT_RETRY_AFTER_MS;
+
+    const current = (Application.getState(BLOCKED_UNTIL_KEY) as number | undefined) ?? 0;
+    Application.setState(Math.max(current, Date.now() + wait), BLOCKED_UNTIL_KEY);
+  }
+
+  override async interceptResponse(
+    request: Request,
+    response: Response,
+    data: ArrayBuffer,
+  ): Promise<ArrayBuffer> {
+    if (
+      response.headers?.["cf-mitigated"] === "challenge" ||
+      (response.status === 403 &&
+        /just a moment|challenge-platform|cf-chl/i.test(Application.arrayBufferToUTF8String(data)))
+    ) {
+      throw new CloudflareError(
+        {
+          url: DOMAIN,
+          method: "GET",
+          headers: { referer: `${DOMAIN}/`, "user-agent": await Application.getDefaultUserAgent() },
+        },
+        "Bot verification detected, bypass it to continue!",
+      );
+    }
+
+    if (response.status === 429) {
+      this.block(response);
+      throw new Error(
+        "The site is rate limiting this device. Reading will resume automatically in a moment.",
+      );
+    }
+
+    if (response.status !== 200) {
+      throw new Error(`Request failed with status ${response.status}: ${request.url}`);
+    }
+
+    return data;
   }
 }
 
