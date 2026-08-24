@@ -11,29 +11,24 @@ import pbconfig from "./pbconfig";
 const DOMAIN_NAME: string = "https://scythescans.com";
 
 /**
- * How long to let the chapter page's own scripts run before giving up on them
- * producing a page list.
- */
-const READER_TIMEOUT_MS = 15000;
-
-/**
- * Read the page list out of the reader once its scripts have populated it.
+ * Read the page list out of the reader.
  *
- * The chapter page ships no page images at all - a plain fetch returns only
- * the cover. The theme's `ts_reader` library is loaded through the site's
- * autoptimize bundles and is handed its sources at runtime, so the list only
- * exists once the page has actually run.
+ * The chapter page ships no page images - a plain fetch returns only the
+ * cover, with or without navigation headers. The theme's `ts_reader` library
+ * arrives through the site's autoptimize bundles and is handed its sources at
+ * runtime, so the list only exists once the page has actually run.
+ *
+ * This has to be a synchronous expression: the webview evaluates it and takes
+ * the completion value, so a promise would come back unresolved.
  */
 const READER_SCRIPT = `
-  new Promise(function (resolve) {
-    var deadline = Date.now() + ${READER_TIMEOUT_MS};
-
-    function collect() {
+  (function () {
+    try {
+      var images = [];
       var reader = window.ts_reader;
       var sources = reader && reader.params && reader.params.sources;
 
       if (sources && sources.length) {
-        var images = [];
         for (var i = 0; i < sources.length; i++) {
           var list = sources[i].images || [];
           for (var j = 0; j < list.length; j++) {
@@ -41,26 +36,24 @@ const READER_SCRIPT = `
           }
           if (images.length) break;
         }
-        if (images.length) return resolve(JSON.stringify(images));
       }
 
-      // Fall back to whatever the reader has already rendered.
-      var rendered = document.querySelectorAll('#readerarea img[data-index]');
-      if (rendered.length) {
-        var out = [];
+      if (!images.length) {
+        // Fall back to whatever the reader has already rendered.
+        var rendered = document.querySelectorAll('#readerarea img');
         for (var k = 0; k < rendered.length; k++) {
-          var src = rendered[k].getAttribute('src');
-          if (src && out.indexOf(src) === -1) out.push(src);
+          var src = rendered[k].getAttribute('src') || rendered[k].getAttribute('data-src');
+          if (src && src.indexOf('readerarea.svg') === -1 && images.indexOf(src) === -1) {
+            images.push(src);
+          }
         }
-        if (out.length) return resolve(JSON.stringify(out));
       }
 
-      if (Date.now() > deadline) return resolve('[]');
-      setTimeout(collect, 250);
+      return JSON.stringify(images);
+    } catch (error) {
+      return '[]';
     }
-
-    collect();
-  })
+  })()
 `;
 
 class ScytheScansExtension extends MangaStreamGeneric {
@@ -87,7 +80,7 @@ class ScytheScansExtension extends MangaStreamGeneric {
         html,
         baseUrl: chapterUrl,
         loadCSS: false,
-        loadImages: false,
+        loadImages: true,
       },
       inject: READER_SCRIPT,
       storage: { cookies: this.cookieStorageInterceptor.cookies as never },
