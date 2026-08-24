@@ -5,6 +5,7 @@ import { ContentRating, type Chapter, type SourceManga, type Tag } from "@paperb
 
 import {
   CONTENT_RATINGS,
+  GENRES,
   STATUS_LABELS,
   type ApiChapter,
   type ApiPage,
@@ -77,6 +78,33 @@ function numberOrUndefined(value: number | null | undefined): number | undefined
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+/** The site's own slug for each genre, looked up by display name. */
+const GENRE_SLUGS = new Map(GENRES.map((genre) => [genre.title.toLowerCase(), genre.id]));
+
+/**
+ * Turns a genre name into a usable tag id.
+ *
+ * The detail route names genres rather than slugging them, and an id may only
+ * hold alphanumerics and `._-@()[]%?#+=/&:` — a name like "Age Gap" is rejected
+ * outright and takes the whole title with it. The catalogue's own slug is used
+ * where there is one so the id matches what the search filter expects.
+ */
+function genreId(name: string): string {
+  const known = GENRE_SLUGS.get(name.toLowerCase());
+
+  if (known) {
+    return known;
+  }
+
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9._\-@()[\]%?#+=/&:]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-|-$/g, "");
+
+  return slug || "unknown";
+}
+
 /** Builds the detail record, carrying across every field the API exposes. */
 export function parseMangaDetails(
   series: ApiSeries,
@@ -84,7 +112,7 @@ export function parseMangaDetails(
   chapterCount?: number,
 ): SourceManga {
   const genres = (series.genres ?? []).filter((genre) => typeof genre === "string" && genre.trim());
-  const tags: Tag[] = genres.map((genre) => ({ id: genre.toLowerCase(), title: genre }));
+  const tags: Tag[] = genres.map((genre) => ({ id: genreId(genre), title: genre }));
 
   const additionalInfo: Record<string, string> = {};
   if (series.type) {
