@@ -6,7 +6,7 @@ import { ContentRating, SourceIntents, type ExtensionInfo } from "@paperback/typ
 export default {
   name: "Manga18Club",
   description: "Extension that pulls content from manga18.club.",
-  version: "2.0.0",
+  version: "3.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.ADULT,

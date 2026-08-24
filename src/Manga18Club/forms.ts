@@ -9,8 +9,9 @@ import {
   SelectRow,
   type FormSectionElement,
 } from "@paperback/types";
+import type { Tag } from "@paperback/types";
 
-import { GENRES, type Manga18SearchMetadata } from "./models";
+import { type Manga18SearchMetadata } from "./models";
 
 /**
  * The site browses genres by path (`/manga-list/<genre>`), so only one genre
@@ -19,10 +20,12 @@ import { GENRES, type Manga18SearchMetadata } from "./models";
  */
 export class Manga18SearchForm extends AdvancedSearchForm {
   private selectedGenre: string[];
+  private readonly genreOptions: Tag[];
 
-  constructor(metadata: Manga18SearchMetadata | undefined) {
+  constructor(metadata: Manga18SearchMetadata | undefined, genreOptions: Tag[]) {
     super();
     this.selectedGenre = metadata?.genre ? [metadata.genre] : [];
+    this.genreOptions = genreOptions;
   }
 
   override getSections(): FormSectionElement<unknown>[] {
@@ -32,7 +35,7 @@ export class Manga18SearchForm extends AdvancedSearchForm {
           title: "Genre",
           layout: "flow",
           value: this.selectedGenre,
-          items: GENRES.map((genre) => ({ id: genre.id, title: genre.title })),
+          items: this.genreOptions.map((genre) => ({ id: genre.id, title: genre.title })),
           minItemCount: 0,
           maxItemCount: 1,
           onValueChange: closureSelector(this, "genre", async (value: string[]) => {

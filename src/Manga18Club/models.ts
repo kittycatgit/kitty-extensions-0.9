@@ -26,9 +26,20 @@ export const SORTING_OPTIONS: SortingOption[] = [
 
 export const DEFAULT_SORT = "lastest";
 
+/** How long a fetched genre list is reused before being refreshed. */
+export const GENRE_CACHE_TTL = 24 * 60 * 60 * 1000;
+export const GENRE_STATE_KEY = "manga18.genres";
+
+/** The nav menu that lists every genre the site browses by. */
+export const GENRE_MENU_SELECTOR = "div.sub-menu a[href*='/manga-list/']";
+
 /**
- * Genre slugs are taken verbatim from the site's own links; their casing is
- * inconsistent (`Ecchi` alongside `action`) and the paths are case sensitive.
+ * Fallback genre list, captured from the site's own navigation menu.
+ *
+ * The live list is read from that menu at runtime and cached; this is only
+ * what the filter falls back to when that request fails. Slugs are kept
+ * verbatim because their casing is inconsistent (`Ecchi` alongside `action`)
+ * and the paths are case sensitive.
  */
 export const GENRES: Tag[] = [
   { id: "18", title: "18+" },
