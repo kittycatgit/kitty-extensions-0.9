@@ -7,6 +7,7 @@ Paperback 0.9 extensions I maintain.
 - [DankeFursLesen](https://danke.moe)
 - [Manga18Club](https://manga18.club)
 - [ManhwaToon](https://www.manhwatoon.me)
+- [ToonTop](https://toontop.io)
 
 ## Installation
 
