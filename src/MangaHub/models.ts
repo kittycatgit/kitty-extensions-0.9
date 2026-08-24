@@ -80,6 +80,16 @@ export const COVER_CDN = "https://thumb.mghcdn.com";
 export const PAGE_CDN = "https://imgx.mghcdn.com";
 
 /**
+ * Stand-in cover for titles the API has no artwork for.
+ *
+ * The app rejects an empty string with "Invalid URL" and, because covers are
+ * converted as an array, one missing cover fails the whole rail rather than a
+ * single card. The site's own square icon is used so those titles stay
+ * reachable instead of taking their section down.
+ */
+export const FALLBACK_COVER = `${DOMAIN}/apple-touch-icon.png`;
+
+/**
  * The schema's own `SearchMod` values, all verified to return distinct rows.
  *
  * `Status` is deliberately absent: the schema accepts it but the resolver

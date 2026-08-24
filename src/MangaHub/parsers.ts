@@ -6,6 +6,7 @@ import { ContentRating, type Chapter, type SourceManga, type Tag } from "@paperb
 import {
   COVER_CDN,
   DOMAIN,
+  FALLBACK_COVER,
   GENRES,
   PAGE_CDN,
   STATUS_LABELS,
@@ -39,13 +40,20 @@ export function genreId(name: string): string {
   return slug || "unknown";
 }
 
-/** Covers arrive as a bare path such as `mh/eleceed.jpg`. */
+/**
+ * Covers arrive as a bare path such as `mh/eleceed.jpg`.
+ *
+ * Some titles have none at all, and an empty string is not a URL the app will
+ * accept, so those fall back to a placeholder rather than being emitted blank.
+ */
 export function coverUrl(image: string | null | undefined): string {
-  if (!image) {
-    return "";
+  const path = (image ?? "").trim();
+
+  if (!path) {
+    return FALLBACK_COVER;
   }
 
-  return /^https?:\/\//i.test(image) ? image : `${COVER_CDN}/${image.replace(/^\/+/, "")}`;
+  return /^https?:\/\//i.test(path) ? path : `${COVER_CDN}/${path.replace(/^\/+/, "")}`;
 }
 
 export function contentRatingOf(manga: ApiManga): ContentRating {
