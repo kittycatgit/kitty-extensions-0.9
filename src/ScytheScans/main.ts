@@ -1,11 +1,21 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright © 2026 kittycatgit */
 
-import { type Chapter, type ChapterDetails, type ContentRating } from "@paperback/types";
+import {
+  DiscoverSectionType,
+  type Chapter,
+  type ChapterDetails,
+  type ContentRating,
+  type PagedResults,
+  type SearchQuery,
+  type SearchResultItem,
+  type SourceManga,
+} from "@paperback/types";
 import { type CheerioAPI } from "cheerio";
 import * as cheerio from "cheerio";
 
 import { MangaStreamGeneric } from "../mangastream/main";
+import type { MangaStreamDiscoverSection, MangaStreamSearchMetadata } from "../mangastream/models";
 import pbconfig from "./pbconfig";
 
 const DOMAIN_NAME: string = "https://scythescans.com";
@@ -82,11 +92,151 @@ class ScytheScansExtension extends MangaStreamGeneric {
   contentRating: ContentRating = pbconfig.contentRating;
 
   override configureSections(): void {
-    // The theme's default latest-updates container is absent here; this site
-    // lays the cards out in a plain `listupd`, which the popular slider also
-    // uses, so exclude that one.
+    // The theme's defaults miss here: this site lays every rail out as `bsx`
+    // cards inside a `listupd`, and shows four rails rather than two.
+    this.featuredSection.selectorFunc = ($: CheerioAPI) =>
+      $("div.bsx", $("h2:contains(Popular Today)").closest("div.bixbox"));
+
     this.latestUpdatesSection.selectorFunc = ($: CheerioAPI) =>
-      $("div.bsx", "div.postbody div.listupd:not(.popularslider)");
+      $("div.bsx", $("h2:contains(Latest Update)").closest("div.bixbox"));
+    this.latestUpdatesSection.subtitleSelectorFunc = (
+      $: CheerioAPI,
+      element: Parameters<MangaStreamDiscoverSection["subtitleSelectorFunc"]>[1],
+    ) => $("div.epxs, div.adds div.epxs", element).first().text().trim();
+
+    this.discoverSections = [
+      this.featuredSection,
+      this.latestUpdatesSection,
+      this.railFor("recommendation", "Recommendation"),
+      this.popularSeriesRail(),
+    ];
+  }
+
+  /** A simple carousel backed by the `bsx` cards under a named heading. */
+  private railFor(id: string, heading: string): MangaStreamDiscoverSection {
+    return {
+      id,
+      title: heading,
+      type: DiscoverSectionType.simpleCarousel,
+      selectorFunc: ($: CheerioAPI) =>
+        $("div.bsx", $(`h2:contains(${heading})`).closest("div.bixbox, div.section")),
+      titleSelectorFunc: ($: CheerioAPI, element) => $("a", element).attr("title") ?? "",
+      subtitleSelectorFunc: ($: CheerioAPI, element) =>
+        $("div.epxs", element).first().text().trim(),
+      itemType: "simpleCarouselItem",
+      enabled: true,
+    };
+  }
+
+  /**
+   * "Popular Series" is not a `bsx` grid like the other rails - it is the
+   * theme's ranking widget, whose list items carry their title as text rather
+   * than in a link attribute.
+   */
+  private popularSeriesRail(): MangaStreamDiscoverSection {
+    return {
+      id: "popular_series",
+      title: "Popular Series",
+      type: DiscoverSectionType.simpleCarousel,
+      selectorFunc: ($: CheerioAPI) => $("div.serieslist.pop li"),
+      titleSelectorFunc: ($: CheerioAPI, element) =>
+        $("div.leftseries h2 a, div.leftseries a", element).first().text().trim(),
+      subtitleSelectorFunc: ($: CheerioAPI, element) =>
+        $("div.leftseries span, span.mgen", element).first().text().trim(),
+      itemType: "simpleCarouselItem",
+      enabled: true,
+    };
+  }
+
+  override async getMangaDetails(mangaId: string): Promise<SourceManga> {
+    const [, buffer] = await Application.scheduleRequest({
+      url: `${this.domain}/${this.directoryPath}/${mangaId}/`,
+      method: "GET",
+    });
+
+    const $ = cheerio.load(Application.arrayBufferToUTF8String(buffer));
+    const manga = this.parser.parseMangaDetails($, mangaId, this);
+
+    // The theme prints its metadata as label/value rows the base does not read.
+    const rows = new Map<string, string>();
+    $("div.tsinfo div.imptdt").each((_, element) => {
+      const text = $(element).text().replace(/\s+/g, " ").trim();
+      const [label, ...rest] = text.split(":");
+      const value = rest.join(":").trim();
+      if (label && value) {
+        rows.set(label.trim().toLowerCase(), value);
+      }
+    });
+
+    const additionalInfo: Record<string, string> = {};
+    for (const [label, key] of [
+      ["type", "Type"],
+      ["released", "Released"],
+      ["serialization", "Serialization"],
+      ["posted on", "Posted"],
+      ["updated on", "Updated"],
+    ] as const) {
+      const value = rows.get(label);
+      if (value) {
+        additionalInfo[key] = value;
+      }
+    }
+
+    const chapterCount = $("div#chapterlist li").length;
+    if (chapterCount > 0) {
+      additionalInfo["Chapters"] = String(chapterCount);
+    }
+
+    const status = rows.get("status");
+    const rating = Number($("[itemprop='ratingValue']").first().text().trim());
+
+    manga.mangaInfo = {
+      ...manga.mangaInfo,
+      shareUrl: `${this.domain}/${this.directoryPath}/${mangaId}/`,
+      ...(status ? { status } : {}),
+      ...(isNaN(rating) || rating <= 0 ? {} : { rating }),
+      ...(Object.keys(additionalInfo).length ? { additionalInfo } : {}),
+    };
+
+    return manga;
+  }
+
+  /**
+   * Title search paginates by path (`/page/2/?s=`); the `?page=` parameter the
+   * theme normally uses is ignored here. Filtered browsing does not paginate at
+   * all - every page of `/manga/` returns the same rows - so it reports a
+   * single page rather than looping forever.
+   */
+  override async getSearchResults(
+    query: SearchQuery<never>,
+    metadata: MangaStreamSearchMetadata | undefined,
+  ): Promise<PagedResults<SearchResultItem>> {
+    const page = metadata?.page ?? 1;
+    const title = (query.title ?? "").trim();
+
+    if (!title) {
+      const browsed = await super.getSearchResults(query, { page: 1 });
+      return { items: browsed.items };
+    }
+
+    const path = page > 1 ? `/page/${page}` : "";
+    const [, buffer] = await Application.scheduleRequest({
+      url: `${this.domain}${path}/?s=${encodeURIComponent(title)}`,
+      method: "GET",
+    });
+
+    const $ = cheerio.load(Application.arrayBufferToUTF8String(buffer));
+    const items: SearchResultItem[] = this.parser.parseSearchResults($).map((result) => ({
+      mangaId: result.mangaId,
+      title: result.title,
+      imageUrl: result.imageUrl,
+      ...(result.subtitle ? { subtitle: result.subtitle } : {}),
+    }));
+
+    return {
+      items,
+      metadata: items.length > 0 ? { page: page + 1 } : undefined,
+    };
   }
 
   override async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
