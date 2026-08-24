@@ -22,10 +22,13 @@ settings.
 
 ## Versioning
 
-Extensions use a single whole number that goes up by one on every release —
-`1`, `2`, `3`. There is no major/minor/patch split to interpret; a higher
-number is simply newer. Bump it whenever you publish, or the app will not
-offer the update.
+Extensions use a whole number in the first position and leave the rest at
+zero — `2.0.0`, then `3.0.0`, then `4.0.0`. Read it as version 2, 3, 4; the
+trailing zeroes exist only because the app compares versions as semver and
+will not recognise a bare number as newer.
+
+Bump it on every release, however small the change, or the app will not offer
+the update.
 
 ## Development
 

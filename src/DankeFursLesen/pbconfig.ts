@@ -6,7 +6,7 @@ import { ContentRating, SourceIntents, type ExtensionInfo } from "@paperback/typ
 export default {
   name: "DankeFursLesen",
   description: "Extension that pulls content from danke.moe.",
-  version: "2",
+  version: "2.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.MATURE,
