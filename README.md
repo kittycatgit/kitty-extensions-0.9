@@ -10,6 +10,7 @@ Paperback 0.9 extensions I maintain.
 - [MangaHub](https://mangahub.io)
 - [ManhwaRead](https://manhwaread.com)
 - [ManhwaToon](https://www.manhwatoon.me)
+- [OniSaga](https://onisaga.com)
 - [ScytheScans](https://scythescans.com)
 - [ToonTop](https://toontop.io)
 
