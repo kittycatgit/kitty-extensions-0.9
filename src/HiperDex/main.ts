@@ -430,7 +430,7 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
       {
         id: TRENDING_SECTIONS[1]!.id,
         title: TRENDING_SECTIONS[1]!.title,
-        type: DiscoverSectionType.prominentCarousel,
+        type: DiscoverSectionType.simpleCarousel,
       },
       {
         id: TRENDING_SECTIONS[2]!.id,
@@ -485,6 +485,8 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
       period: trending.period,
     });
 
+    // Only the first rail is the hero banner; the rest share one carousel so the
+    // trending rails read as a set rather than three different-looking blocks.
     const items = (Array.isArray(rows) ? rows : []).map((row) =>
       section.id === TRENDING_SECTIONS[0]!.id
         ? {
@@ -496,23 +498,14 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
             ...(row.synopsis?.trim() ? { summary: row.synopsis.trim() } : {}),
             ...(row.latestChapter ? { supertitle: `Chapter ${row.latestChapter.number}` } : {}),
           }
-        : section.id === TRENDING_SECTIONS[1]!.id
-          ? {
-              type: "prominentCarouselItem" as const,
-              mangaId: row.slug,
-              imageUrl: row.coverUrl ?? "",
-              title: row.title?.trim() || row.slug,
-              contentRating: contentRatingOf(row.contentRating),
-              ...(row.latestChapter ? { subtitle: `Chapter ${row.latestChapter.number}` } : {}),
-            }
-          : {
-              type: "simpleCarouselItem" as const,
-              mangaId: row.slug,
-              imageUrl: row.coverUrl ?? "",
-              title: row.title?.trim() || row.slug,
-              contentRating: contentRatingOf(row.contentRating),
-              ...(row.latestChapter ? { subtitle: `Chapter ${row.latestChapter.number}` } : {}),
-            },
+        : {
+            type: "simpleCarouselItem" as const,
+            mangaId: row.slug,
+            imageUrl: row.coverUrl ?? "",
+            title: row.title?.trim() || row.slug,
+            contentRating: contentRatingOf(row.contentRating),
+            ...(row.latestChapter ? { subtitle: `Chapter ${row.latestChapter.number}` } : {}),
+          },
     );
 
     return {
