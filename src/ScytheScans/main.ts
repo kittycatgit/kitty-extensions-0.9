@@ -176,7 +176,9 @@ class ScytheScansExtension extends MangaStreamGeneric {
 
     return {
       items,
-      ...(paginates && items.length > 0 ? { metadata: { page: page + 1 } } : {}),
+      ...(paginates && items.length > 0 && linksToPage($, page + 1)
+        ? { metadata: { page: page + 1 } }
+        : {}),
     };
   }
 
@@ -269,7 +271,7 @@ class ScytheScansExtension extends MangaStreamGeneric {
 
     return {
       items,
-      metadata: items.length > 0 ? { page: page + 1 } : undefined,
+      ...(items.length > 0 && linksToPage($, page + 1) ? { metadata: { page: page + 1 } } : {}),
     };
   }
 
@@ -322,6 +324,17 @@ class ScytheScansExtension extends MangaStreamGeneric {
 
     return url;
   }
+}
+
+/**
+ * The theme prints an explicit link to the following page. Advancing without
+ * checking asks for a page that does not exist, which the site answers with a
+ * 404 rather than an empty list.
+ */
+function linksToPage($: CheerioAPI, page: number): boolean {
+  return $("a[href]")
+    .toArray()
+    .some((element) => ($(element).attr("href") ?? "").includes(`/page/${page}/`));
 }
 
 /**
