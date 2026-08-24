@@ -41,7 +41,7 @@ export function parseListing($: CheerioAPI, domain: string): SearchResultItem[] 
   const seen = new Set<string>();
 
   for (const element of $(".manga-item").toArray()) {
-    const link = $("a.manga-item__link, a[href*='/manhwa/']", element).first();
+    const link = $("a.manga-item__link", element).first();
     const mangaId = slugFromHref(link.attr("href"));
     if (!mangaId || seen.has(mangaId)) {
       continue;
@@ -52,10 +52,8 @@ export function parseListing($: CheerioAPI, domain: string): SearchResultItem[] 
     const title = link.attr("title")?.trim() || link.text().trim();
 
     // The card lists its newest chapter; show it rather than leaving the row bare.
-    const subtitle = $("a[href*='chapter'], .manga-item__chapter, .chapter-item__name", element)
-      .first()
-      .text()
-      .trim();
+    // Cards list their newest chapters; the text carries a relative date too.
+    const subtitle = $("a.chapter-item", element).first().text().replace(/\s+/g, " ").trim();
 
     items.push({
       mangaId,
@@ -82,10 +80,8 @@ export function hasNextPage($: CheerioAPI): boolean {
 }
 
 export function parseMangaDetails($: CheerioAPI, mangaId: string, domain: string): SourceManga {
-  const primaryTitle =
-    $("#mangaSummary .manga-titles h1").first().text().trim() ||
-    $("h1").first().text().trim() ||
-    mangaId;
+  // A bare `h1` is the site logo, so stay inside the summary block.
+  const primaryTitle = $("#mangaSummary .manga-titles h1").first().text().trim() || mangaId;
 
   const secondaryTitles = $("#mangaSummary .manga-titles h2")
     .first()
@@ -116,7 +112,8 @@ export function parseMangaDetails($: CheerioAPI, mangaId: string, domain: string
     textsOf(`#mangaSummary .text-primary:contains(${label}) + .flex a span:first-child`);
 
   const tagGroups: TagSection[] = [];
-  const genres = textsOf("#mangaSummary .manga-genres a");
+  // Genre links point at `/genre/<slug>/`; the nav's `/genre-index/` does not match.
+  const genres = textsOf("#mangaSummary a[href*='/genre/']");
   if (genres.length > 0) {
     tagGroups.push({ id: "genres", title: "Genres", tags: asTags(genres) });
   }
@@ -125,7 +122,7 @@ export function parseMangaDetails($: CheerioAPI, mangaId: string, domain: string
     tagGroups.push({ id: "tags", title: "Tags", tags: asTags(tags) });
   }
 
-  const rawStatus = ($("#mangaSummary .manga-status").first().attr("data-status") ?? "")
+  const rawStatus = ($("#mangaSummary [data-status]").first().attr("data-status") ?? "")
     .trim()
     .toLowerCase();
   const status = STATUS_LABELS[rawStatus];
@@ -134,11 +131,12 @@ export function parseMangaDetails($: CheerioAPI, mangaId: string, domain: string
   const artist = labelled("Artist").join(", ");
 
   const additionalInfo: Record<string, string> = {};
-  const chapterCount = $("#chaptersList > a.chapter-item, a.chapter-item").length;
+  const chapterCount = $("#chaptersList > a.chapter-item").length;
   if (chapterCount > 0) {
     additionalInfo["Chapters"] = String(chapterCount);
   }
-  const latest = $("#chaptersList > a.chapter-item, a.chapter-item")
+  // The chapter list runs oldest first, so the newest sits last.
+  const latest = $("#chaptersList > a.chapter-item")
     .last()
     .find("span.chapter-item__name")
     .text()
@@ -193,7 +191,7 @@ export function parseChapters($: CheerioAPI, sourceManga: SourceManga): Chapter[
   const chapters: Chapter[] = [];
   const seen = new Set<string>();
 
-  for (const element of $("#chaptersList > a.chapter-item, a.chapter-item").toArray()) {
+  for (const element of $("#chaptersList > a.chapter-item").toArray()) {
     const chapterId = chapterIdFromHref($(element).attr("href"));
     if (!chapterId || seen.has(chapterId)) {
       continue;

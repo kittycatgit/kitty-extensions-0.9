@@ -9,27 +9,28 @@ export type ManhwaReadSearchMetadata = {
   completed?: boolean;
 };
 
-/** Values the site accepts for its `sortby` query parameter. */
+/**
+ * `sortby` values confirmed to return distinct listings. The endpoint silently
+ * falls back to its default for anything it does not recognise, so only values
+ * verified against the live site are offered here.
+ */
 export const SORTING_OPTIONS: SortingOption[] = [
-  { id: "release", label: "Latest" },
+  { id: "release", label: "Latest Release" },
+  { id: "new", label: "New Manhwa" },
+  { id: "weekly_top", label: "Popular this Week" },
   { id: "daily_top", label: "Popular Today" },
-  { id: "weekly_top", label: "Popular This Week" },
-  { id: "monthly_top", label: "Popular This Month" },
-  { id: "all_top", label: "Most Popular" },
 ];
 
 export const DEFAULT_SORT = "release";
 
-/** One rail per sort mode the site exposes. */
+/** The three rails the site's own home page shows, with the sort each maps to. */
 export const HOME_SECTIONS: { id: string; title: string; sort: string }[] = [
-  { id: "daily_top", title: "Popular Today", sort: "daily_top" },
-  { id: "weekly_top", title: "Popular This Week", sort: "weekly_top" },
-  { id: "monthly_top", title: "Popular This Month", sort: "monthly_top" },
-  { id: "all_top", title: "Most Popular", sort: "all_top" },
-  { id: "release", title: "Latest Updates", sort: "release" },
+  { id: "weekly_top", title: "Popular this Week", sort: "weekly_top" },
+  { id: "new", title: "New Manhwa", sort: "new" },
+  { id: "release", title: "Latest Release", sort: "release" },
 ];
 
-/** The site publishes status as a `data-status` attribute. */
+/** Status is published as a `data-status` attribute. */
 export const STATUS_LABELS: Record<string, string> = {
   ongoing: "Ongoing",
   incomplete: "Ongoing",
@@ -37,4 +38,5 @@ export const STATUS_LABELS: Record<string, string> = {
   canceled: "Cancelled",
   cancelled: "Cancelled",
   "on-hold": "Hiatus",
+  hiatus: "Hiatus",
 };

@@ -86,7 +86,9 @@ class ManhwaReadExtension implements ExtensionImpl<typeof pbconfigType> {
   }
 
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
-    const { html } = await this.fetch(`${DOMAIN}/${chapter.chapterId}/`);
+    const { html } = await this.fetch(
+      `${DOMAIN}/manhwa/${chapter.sourceManga.mangaId}/${chapter.chapterId}/`,
+    );
     const pages = parseChapterPages(html);
 
     if (pages.length === 0) {
@@ -136,7 +138,7 @@ class ManhwaReadExtension implements ExtensionImpl<typeof pbconfigType> {
       id: section.id,
       title: section.title,
       type:
-        section.id === "daily_top"
+        section.id === "weekly_top"
           ? DiscoverSectionType.featured
           : DiscoverSectionType.simpleCarousel,
     }));
@@ -155,7 +157,7 @@ class ManhwaReadExtension implements ExtensionImpl<typeof pbconfigType> {
     const sort = HOME_SECTIONS.find((entry) => entry.id === section.id)?.sort ?? DEFAULT_SORT;
     const { $ } = await this.fetch(this.browseUrl(page, "", sort));
     const rows = parseListing($, DOMAIN);
-    const featured = section.id === "daily_top";
+    const featured = section.id === "weekly_top";
 
     return {
       items: rows.map((row) =>
