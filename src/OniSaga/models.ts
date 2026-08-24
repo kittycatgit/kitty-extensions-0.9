@@ -62,7 +62,27 @@ export const READER_TOKEN_HEADER = "X-Reader-Token";
  * it: going too fast earns a 429 whose penalty lasts far longer than the time
  * saved. This is the pace the site's own reader keeps.
  */
-export const PAGE_REQUEST_GAP_MS = 1500;
+/**
+ * Starting gap between page requests.
+ *
+ * The published allowance (300) is barely touched — device logs showed it only
+ * falling 293 to 284 while still earning a 429 — so the limit that actually
+ * bites is a short-window burst rule whose size the site does not publish.
+ * Each page also costs a second request for its image, so the domain sees
+ * roughly double this rate. The gap therefore starts conservative and tunes
+ * itself from there.
+ */
+export const PAGE_REQUEST_GAP_MS = 2500;
+
+/** Bounds and step for the self-tuning gap. */
+export const MAX_PAGE_GAP_MS = 6000;
+export const GAP_INCREASE_MS = 750;
+export const GAP_DECAY_MS = 250;
+/** Consecutive successes before easing the gap back down. */
+export const GAP_DECAY_AFTER = 8;
+
+export const GAP_KEY = "onisaga.gap";
+export const STREAK_KEY = "onisaga.streak";
 
 /**
  * The furthest ahead the paced-slot cursor is trusted.

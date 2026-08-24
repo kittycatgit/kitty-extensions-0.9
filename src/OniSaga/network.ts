@@ -11,9 +11,15 @@ import {
 import {
   DEFAULT_RETRY_AFTER_MS,
   DOMAIN,
+  GAP_DECAY_AFTER,
+  GAP_DECAY_MS,
+  GAP_INCREASE_MS,
+  GAP_KEY,
+  MAX_PAGE_GAP_MS,
   MAX_SLOT_LOOKAHEAD_MS,
   PAGE_REQUEST_GAP_MS,
   READER_TOKEN_HEADER,
+  STREAK_KEY,
   pageApiUrl,
   parsePageMarker,
   readerUrl,
@@ -147,13 +153,49 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
       await Application.sleep((blockedUntil - now) / 1000);
     }
 
+    const gap = this.currentGap();
     const lastAt = (Application.getState(LAST_AT_KEY) as number | undefined) ?? 0;
     const since = Date.now() - lastAt;
-    if (since >= 0 && since < PAGE_REQUEST_GAP_MS) {
-      await Application.sleep((PAGE_REQUEST_GAP_MS - since) / 1000);
+    if (since >= 0 && since < gap) {
+      await Application.sleep((gap - since) / 1000);
     }
 
     Application.setState(Date.now(), LAST_AT_KEY);
+  }
+
+  /** The gap in force, which rises after a refusal and eases back on success. */
+  private currentGap(): number {
+    const stored = Application.getState(GAP_KEY) as number | undefined;
+    return typeof stored === "number" && stored >= PAGE_REQUEST_GAP_MS
+      ? Math.min(stored, MAX_PAGE_GAP_MS)
+      : PAGE_REQUEST_GAP_MS;
+  }
+
+  /**
+   * Widens the gap after a refusal.
+   *
+   * The burst window the site enforces is not published, so rather than guess
+   * it the extension backs off a step each time it is refused and settles at
+   * whatever pace the site actually tolerates.
+   */
+  private widenGap(): void {
+    const next = Math.min(this.currentGap() + GAP_INCREASE_MS, MAX_PAGE_GAP_MS);
+    Application.setState(next, GAP_KEY);
+    Application.setState(0, STREAK_KEY);
+  }
+
+  /** Eases the gap back down once a run of requests has gone through cleanly. */
+  private noteSuccess(): void {
+    const streak = ((Application.getState(STREAK_KEY) as number | undefined) ?? 0) + 1;
+
+    if (streak < GAP_DECAY_AFTER) {
+      Application.setState(streak, STREAK_KEY);
+      return;
+    }
+
+    Application.setState(0, STREAK_KEY);
+    const eased = Math.max(this.currentGap() - GAP_DECAY_MS, PAGE_REQUEST_GAP_MS);
+    Application.setState(eased, GAP_KEY);
   }
 
   /** Performs one page resolution, refreshing the token once on a plain 403. */
@@ -195,11 +237,13 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     // The rate limit escalates to a Cloudflare challenge on the API itself.
     // Treat it as a hard back-off rather than a challenge the reader can solve.
     if (response.headers?.["cf-mitigated"] === "challenge") {
+      this.widenGap();
       this.block(CF_COOLDOWN_MS);
       return { status: response.status, cloudflare: true };
     }
 
     if (response.status === 429) {
+      this.widenGap();
       this.block(this.retryAfterMs(response));
       return { status: 429 };
     }
@@ -210,6 +254,11 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
 
     try {
       const body = JSON.parse(Application.arrayBufferToUTF8String(buffer)) as { url?: string };
+
+      if (body.url) {
+        this.noteSuccess();
+      }
+
       return { status: 200, ...(body.url ? { url: body.url } : {}) };
     } catch {
       return { status: response.status };
