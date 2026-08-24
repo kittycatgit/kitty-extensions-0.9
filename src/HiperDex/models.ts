@@ -149,7 +149,20 @@ export const CONTENT_RATINGS: Record<string, ContentRating> = {
   pornographic: ContentRating.ADULT,
 };
 
-/** Every genre the catalogue exposes, as returned by `search.genres`. */
+/** A genre as the API lists it. */
+export type ApiGenre = { id: number; name: string; slug: string };
+
+/** How long a fetched genre list is reused before being refreshed. */
+export const GENRE_CACHE_TTL = 24 * 60 * 60 * 1000;
+export const GENRE_STATE_KEY = "hiperdex.genres";
+
+/**
+ * Fallback genre list, captured from `search.genres`.
+ *
+ * The live list is fetched and cached at runtime; this is what the filter and
+ * the genre rail fall back to when that request fails, and it is also the
+ * name-to-slug map the detail parser uses to build valid tag ids.
+ */
 export const GENRES: Tag[] = [
   { id: "4-koma", title: "4-Koma" },
   { id: "action", title: "Action" },

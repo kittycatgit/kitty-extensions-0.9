@@ -9,10 +9,10 @@ import {
   SelectRow,
   type FormSectionElement,
 } from "@paperback/types";
+import type { Tag } from "@paperback/types";
 
 import {
   CONTENT_RATING_OPTIONS,
-  GENRES,
   STATUS_OPTIONS,
   TYPE_OPTIONS,
   type HiperDexSearchMetadata,
@@ -25,9 +25,11 @@ export class HiperDexSearchForm extends AdvancedSearchForm {
   private status: string[];
   private contentRating: string[];
   private year: string;
+  private readonly genreOptions: Tag[];
 
-  constructor(metadata: HiperDexSearchMetadata | undefined) {
+  constructor(metadata: HiperDexSearchMetadata | undefined, genreOptions: Tag[]) {
     super();
+    this.genreOptions = genreOptions;
     this.genres = metadata?.genres ?? [];
     this.type = metadata?.type ? [metadata.type] : [];
     this.status = metadata?.status ? [metadata.status] : [];
@@ -50,9 +52,9 @@ export class HiperDexSearchForm extends AdvancedSearchForm {
             title: "Genres",
             layout: "flow",
             value: this.genres,
-            items: GENRES.map((genre) => ({ id: genre.id, title: genre.title })),
+            items: this.genreOptions.map((genre) => ({ id: genre.id, title: genre.title })),
             minItemCount: 0,
-            maxItemCount: GENRES.length,
+            maxItemCount: this.genreOptions.length,
             onValueChange: closureSelector(this, "genres", async (value: string[]) => {
               this.genres = value;
               this.reloadForm();

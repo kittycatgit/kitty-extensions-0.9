@@ -18,12 +18,15 @@ import {
   type SearchResultItem,
   type SortingOption,
   type SourceManga,
+  type Tag,
 } from "@paperback/types";
 
 import { compact, HiperDexApi, ReaderForbiddenError } from "./api";
 import { HiperDexSearchForm } from "./forms";
 import {
   DEFAULT_SORT,
+  GENRE_CACHE_TTL,
+  GENRE_STATE_KEY,
   GENRES,
   GENRES_SECTION_ID,
   LATEST_SECTION_ID,
@@ -34,6 +37,7 @@ import {
   TRENDING_PAGE_SIZE,
   TRENDING_SECTIONS,
   type ApiChapter,
+  type ApiGenre,
   type ApiLatestItem,
   type ApiPage,
   type ApiSeries,
@@ -272,12 +276,70 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
     return undefined;
   }
 
+  /**
+   * The catalogue's genre list, fetched once a day and cached.
+   *
+   * The site publishes its genres through the API, so they are read from there
+   * rather than frozen into the build; the bundled list is only a fallback for
+   * when that request fails, so the filter is never left empty.
+   */
+  private async genreTags(): Promise<Tag[]> {
+    const cached = Application.getState(GENRE_STATE_KEY) as
+      | { at?: number; genres?: Tag[] }
+      | undefined;
+
+    if (
+      cached?.genres &&
+      cached.genres.length > 0 &&
+      typeof cached.at === "number" &&
+      Date.now() - cached.at < GENRE_CACHE_TTL
+    ) {
+      return cached.genres;
+    }
+
+    try {
+      const rows = await this.api.query<ApiGenre[]>("search.genres", null);
+
+      const genres = (Array.isArray(rows) ? rows : [])
+        .filter((row) => row?.slug && row?.name)
+        .map((row) => ({ id: row.slug, title: row.name }))
+        .sort((a, b) => a.title.localeCompare(b.title));
+
+      if (genres.length > 0) {
+        Application.setState({ at: Date.now(), genres }, GENRE_STATE_KEY);
+        return genres;
+      }
+    } catch {
+      /* fall back to the bundled list below */
+    }
+
+    return cached?.genres && cached.genres.length > 0 ? cached.genres : GENRES;
+  }
+
+  /**
+   * Turns genre slugs into the names the search filter matches on.
+   *
+   * Filter values are compared against the genre's display name, not its slug:
+   * a single-word genre works either way, but "age-gap" matches nothing where
+   * "Age Gap" matches. Slugs are still what the form and tag ids carry, since
+   * an id may not contain spaces.
+   */
+  private async genreNames(slugs: string[]): Promise<string[]> {
+    const tags = await this.genreTags();
+    const bySlug = new Map(tags.map((tag) => [tag.id, tag.title]));
+
+    return slugs.map((slug) => bySlug.get(slug) ?? slug.replace(/-/g, " "));
+  }
+
   async getSortingOptions(): Promise<SortingOption[]> {
     return SORTING_OPTIONS;
   }
 
   async getAdvancedSearchForm(query: SearchQuery<Metadata>): Promise<HiperDexSearchForm> {
-    return new HiperDexSearchForm(query.metadata as HiperDexSearchMetadata | undefined);
+    return new HiperDexSearchForm(
+      query.metadata as HiperDexSearchMetadata | undefined,
+      await this.genreTags(),
+    );
   }
 
   async getSearchResults(
@@ -297,6 +359,8 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
     const offset = paging?.offset ?? 0;
     const sort = paging?.sort ?? sortingOption?.id ?? DEFAULT_SORT;
 
+    const genreSlugs = filters.genres && filters.genres.length > 0 ? filters.genres : undefined;
+
     const response = await this.api.query<{ hits?: ApiSeries[]; totalHits?: number }>(
       "search.query",
       {
@@ -304,7 +368,7 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
         sort,
         // An unset filter has to be absent: the API rejects an explicit null.
         filters: compact({
-          genres: filters.genres && filters.genres.length > 0 ? filters.genres : undefined,
+          genres: genreSlugs ? await this.genreNames(genreSlugs) : undefined,
           type: filters.type,
           status: filters.status,
           contentRating: filters.contentRating,
@@ -327,7 +391,7 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
           ? compact({
               offset: nextOffset,
               sort,
-              genres: filters.genres && filters.genres.length > 0 ? filters.genres : undefined,
+              genres: genreSlugs,
               type: filters.type,
               status: filters.status,
               contentRating: filters.contentRating,
@@ -388,8 +452,10 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
     }
 
     if (section.id === GENRES_SECTION_ID) {
+      const genres = await this.genreTags();
+
       return {
-        items: GENRES.map((genre) => ({
+        items: genres.map((genre) => ({
           type: "genresCarouselItem" as const,
           name: genre.title,
           searchQuery: { title: "", metadata: { genres: [genre.id] } },
