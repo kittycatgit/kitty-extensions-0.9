@@ -5,6 +5,7 @@ Paperback 0.9 extensions I maintain.
 ## Available Extensions
 
 - [DankeFursLesen](https://danke.moe)
+- [HiperDex](https://hiperdex.tv)
 - [Manga18Club](https://manga18.club)
 - [ManhwaRead](https://manhwaread.com)
 - [ManhwaToon](https://www.manhwatoon.me)
