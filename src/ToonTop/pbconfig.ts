@@ -6,7 +6,7 @@ import { ContentRating, SourceIntents, type ExtensionInfo } from "@paperback/typ
 export default {
   name: "ToonTop",
   description: "Extension that pulls content from toontop.io.",
-  version: "1.1.0",
+  version: "1.1.1",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.MATURE,

@@ -3,6 +3,12 @@
 
 import type { SortingOption } from "@paperback/types";
 
+/** Alternate titles arrive as objects, not plain strings. */
+export type ToonTopAltName = {
+  name?: string;
+  language?: string;
+};
+
 /** A named reference as the site returns them (genres, tags, authors). */
 export type ToonTopRef = {
   id: string;
@@ -30,7 +36,7 @@ export type ToonTopItem = {
   rating?: number;
   updatedAt?: string;
   altName?: string;
-  altNames?: string[] | null;
+  altNames?: ToonTopAltName[] | null;
   displayViews?: string;
   displayChapters?: string;
   displayUpdated?: string;

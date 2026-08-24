@@ -187,7 +187,15 @@ class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
     if (manga.isRaw) additionalInfo["Raw"] = "Yes";
     if (manga.isMtl) additionalInfo["Machine translated"] = "Yes";
 
-    const secondaryTitles = (manga.altNames ?? []).filter((name): name is string => !!name);
+    // `altNames` holds `{ name, language }` objects; `secondaryTitles` is a
+    // plain string array and the app rejects anything else.
+    const secondaryTitles: string[] = [];
+    for (const alt of manga.altNames ?? []) {
+      const name = typeof alt === "string" ? alt : alt?.name;
+      if (name && !secondaryTitles.includes(name)) {
+        secondaryTitles.push(name);
+      }
+    }
     if (manga.altName && !secondaryTitles.includes(manga.altName)) {
       secondaryTitles.push(manga.altName);
     }
