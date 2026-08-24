@@ -6,6 +6,8 @@ import {
   type Chapter,
   type ChapterDetails,
   type ContentRating,
+  type DiscoverSection,
+  type DiscoverSectionItem,
   type PagedResults,
   type SearchQuery,
   type SearchResultItem,
@@ -145,6 +147,36 @@ class ScytheScansExtension extends MangaStreamGeneric {
         $("div.leftseries span, span.mgen", element).first().text().trim(),
       itemType: "simpleCarouselItem",
       enabled: true,
+    };
+  }
+
+  /**
+   * The base resolves a rail through a hardcoded switch that only knows
+   * "popular" and "latest_updates" - every other id silently falls through to
+   * latest updates, so extra rails would all render the same rows. Resolve the
+   * section by its own id instead.
+   *
+   * Only the latest rail paginates: the home page continues at `/page/N/`,
+   * while the popular and recommendation widgets are single payloads.
+   */
+  override async getDiscoverSectionItems(
+    section: DiscoverSection,
+    metadata: MangaStreamSearchMetadata | undefined,
+  ): Promise<PagedResults<DiscoverSectionItem>> {
+    const resolved =
+      this.discoverSections.find((entry) => entry.id === section.id) ?? this.latestUpdatesSection;
+
+    const paginates = resolved.id === this.latestUpdatesSection.id;
+    const page = metadata?.page ?? 1;
+    const url = paginates && page > 1 ? `${this.domain}/page/${page}/` : this.domain;
+
+    const [, buffer] = await Application.scheduleRequest({ url, method: "GET" });
+    const $ = cheerio.load(Application.arrayBufferToUTF8String(buffer));
+    const items = await this.parser.parseHomeSection($, resolved, this);
+
+    return {
+      items,
+      ...(paginates && items.length > 0 ? { metadata: { page: page + 1 } } : {}),
     };
   }
 
