@@ -41,9 +41,12 @@ export class ManhwaReadInterceptor extends PaperbackInterceptor {
         /just a moment|challenge-platform/i.test(Application.arrayBufferToUTF8String(data)));
 
     if (challenged) {
+      // Point every challenge at the domain root, not request.url. Concurrent
+      // requests (rails, images) fail together; a shared canonical URL lets the
+      // app coalesce them into a single challenge instead of one per request.
       throw new CloudflareError(
         {
-          url: request.url,
+          url: this.domain,
           method: "GET",
           headers: {
             referer: `${this.domain}/`,
