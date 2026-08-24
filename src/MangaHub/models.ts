@@ -84,10 +84,11 @@ export const PAGE_CDN = "https://imgx.mghcdn.com";
  *
  * The app rejects an empty string with "Invalid URL" and, because covers are
  * converted as an array, one missing cover fails the whole rail rather than a
- * single card. The site's own square icon is used so those titles stay
- * reachable instead of taking their section down.
+ * single card. This is a real URL on the cover host that holds no image, so
+ * the app falls through to its own placeholder rather than being handed
+ * substitute artwork.
  */
-export const FALLBACK_COVER = `${DOMAIN}/apple-touch-icon.png`;
+export const FALLBACK_COVER = `${COVER_CDN}/no-cover.jpg`;
 
 /**
  * The schema's own `SearchMod` values, all verified to return distinct rows.
