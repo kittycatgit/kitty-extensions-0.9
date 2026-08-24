@@ -16,6 +16,7 @@ import {
   pageApiUrl,
   parsePageMarker,
   readerUrl,
+  SIGNED_URL_TTL_MS,
   TOKEN_TTL_MS,
 } from "./models";
 
@@ -24,6 +25,17 @@ type ChapterToken = { token: string; mangaId: string; at: number };
 export class OniSagaInterceptor extends PaperbackInterceptor {
   /** Reader tokens are issued per chapter, so they are cached per chapter. */
   private readonly tokens = new Map<string, ChapterToken>();
+
+  /**
+   * Resolved page URLs, keyed by "chapterId:index".
+   *
+   * The app prefetches each page and asks for it more than once, so without
+   * this every page was resolved twice - the device logs showed exactly that,
+   * doubling the request rate until the site returned a 429. An in-flight
+   * promise is cached too, so simultaneous requests for the same page share a
+   * single resolution rather than racing into two API calls.
+   */
+  private readonly resolved = new Map<string, { url: string; at: number } | Promise<string>>();
 
   /** Serialises page resolution; the site refuses to be asked in parallel. */
   private queue: Promise<unknown> = Promise.resolve();
@@ -135,12 +147,42 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     if (since < PAGE_REQUEST_GAP_MS) {
       await Application.sleep((PAGE_REQUEST_GAP_MS - since) / 1000);
     }
-
-    this.lastPageRequest = Date.now();
   }
 
   /** Asks the site for one page's signed URL, refreshing the token if refused. */
-  private async resolvePage(chapterId: string, index: number): Promise<string> {
+  private resolvePage(chapterId: string, index: number): Promise<string> {
+    const key = `${chapterId}:${index}`;
+    const cached = this.resolved.get(key);
+
+    if (cached) {
+      // A settled entry within its lifetime, or a resolution already running.
+      if (cached instanceof Promise) {
+        return cached;
+      }
+
+      if (Date.now() - cached.at < SIGNED_URL_TTL_MS) {
+        return Promise.resolve(cached.url);
+      }
+    }
+
+    const pending = this.mintPage(chapterId, index).then(
+      (url) => {
+        this.resolved.set(key, { url, at: Date.now() });
+        return url;
+      },
+      (error: unknown) => {
+        // A failed attempt must not be cached, or the page can never recover.
+        this.resolved.delete(key);
+        throw error;
+      },
+    );
+
+    this.resolved.set(key, pending);
+    return pending;
+  }
+
+  /** Performs one page resolution, paced, refreshing the token on a refusal. */
+  private async mintPage(chapterId: string, index: number): Promise<string> {
     await this.pace();
 
     let token = await this.tokenFor(chapterId);
@@ -166,6 +208,10 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     index: number,
     token: string,
   ): Promise<{ status: number; url?: string }> {
+    // Measured from the real call, not from pace(): fetching a token between
+    // the two would otherwise let the gap between page requests shrink.
+    this.lastPageRequest = Date.now();
+
     const [response, buffer] = await Application.scheduleRequest({
       url: pageApiUrl(chapterId, index),
       method: "GET",

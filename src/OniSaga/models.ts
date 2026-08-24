@@ -71,6 +71,15 @@ export const DEFAULT_RETRY_AFTER_MS = 60_000;
 export const TOKEN_TTL_MS = 5 * 60 * 1000;
 
 /**
+ * How long a resolved page URL is reused.
+ *
+ * The signed URLs expire ten minutes after they are minted, so they are held a
+ * little under that: long enough to serve the app's repeat requests for the
+ * same page, short enough that a reused link is never already dead.
+ */
+export const SIGNED_URL_TTL_MS = 8 * 60 * 1000;
+
+/**
  * Listing routes used for the home rails.
  *
  * `/browse` is deliberately absent: it renders its filter form as some

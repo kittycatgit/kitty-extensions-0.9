@@ -2,7 +2,6 @@
 /* Copyright © 2026 kittycatgit */
 
 import {
-  BasicRateLimiter,
   CookieStorageInterceptor,
   DiscoverSectionType,
   type Chapter,
@@ -38,28 +37,15 @@ const SNAPSHOT_PAGE = "/top-manga";
 const BROWSE_PATH = "/top-manga";
 
 class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
-  /**
-   * Paced deliberately.
-   *
-   * Images are included rather than exempted: page fetches are exactly what
-   * this site rate limits, and a burst earns a penalty that costs far more
-   * than the time saved.
-   */
-  private readonly rateLimiter = new BasicRateLimiter("ratelimiter", {
-    numberOfRequests: 20,
-    bufferInterval: 60,
-    ignoreImages: false,
-  });
-
   private readonly cookieStorage = new CookieStorageInterceptor({ storage: "stateManager" });
 
   private readonly interceptor = new OniSagaInterceptor("main");
 
   async initialise(): Promise<void> {
     this.cookieStorage.registerInterceptor();
-    // Registered before the page interceptor so its lock is released by the
-    // time a page resolution needs to make its own request.
-    this.rateLimiter.registerInterceptor();
+    // The page interceptor is the only throttle: it paces page resolution and
+    // honours a 429's Retry-After itself. A window-based limiter on top of it
+    // only stalled the reader for a full minute at a time.
     this.interceptor.registerInterceptor();
   }
 
