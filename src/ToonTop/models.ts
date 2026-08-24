@@ -11,6 +11,14 @@ export type ToonTopRef = {
 };
 
 /** A row in any listing, and the detail payload, share one shape. */
+export type ToonTopStats = {
+  views?: number;
+  dayViews?: number;
+  weekViews?: number;
+  monthViews?: number;
+  bookmarksCount?: number;
+};
+
 export type ToonTopItem = {
   id: string;
   url: string;
@@ -34,7 +42,7 @@ export type ToonTopItem = {
   genres?: ToonTopRef[];
   tags?: ToonTopRef[];
   chapters?: ToonTopChapter[];
-  stats?: { views?: number; bookmarksCount?: number };
+  stats?: ToonTopStats;
 };
 
 export type ToonTopChapter = {
@@ -69,6 +77,23 @@ export const SORTING_OPTIONS: SortingOption[] = [
 ];
 
 export const DEFAULT_SORT = "latest";
+
+/**
+ * Rankings computed locally. The site ships per-title day/week/month view
+ * counts on every listing row, but neither `latest` nor `popular` honours a
+ * sort parameter, so these are ordered client side over a pooled sample.
+ */
+export const RANKED_SECTIONS: {
+  id: string;
+  title: string;
+  by: keyof ToonTopStats | "rating";
+}[] = [
+  { id: "topToday", title: "Top Today", by: "dayViews" },
+  { id: "topWeek", title: "Top This Week", by: "weekViews" },
+  { id: "topMonth", title: "Top This Month", by: "monthViews" },
+  { id: "topRated", title: "Top Rated", by: "rating" },
+  { id: "mostBookmarked", title: "Most Bookmarked", by: "bookmarksCount" },
+];
 
 /** Discover rails, matching the sections the site's own home page shows. */
 export const HOME_SECTIONS: { id: string; title: string; prop: string }[] = [

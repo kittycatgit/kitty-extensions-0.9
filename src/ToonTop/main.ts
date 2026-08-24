@@ -27,11 +27,13 @@ import { ToonTopSearchForm } from "./forms";
 import {
   DEFAULT_SORT,
   HOME_SECTIONS,
+  RANKED_SECTIONS,
   SORTING_OPTIONS,
   type ToonTopItem,
   type ToonTopPagination,
   type ToonTopRef,
   type ToonTopSearchMetadata,
+  type ToonTopStats,
 } from "./models";
 import { ToonTopInterceptor } from "./network";
 import type pbconfigType from "./pbconfig";
@@ -53,6 +55,9 @@ class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
   private buildId?: string;
 
   private genreCache?: ToonTopRef[];
+
+  /** Pooled rows used for the locally ranked rails. */
+  private pool?: { at: number; items: ToonTopItem[] };
 
   async initialise(): Promise<void> {
     this.cookieStorage.registerInterceptor();
@@ -98,6 +103,55 @@ class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
     }
 
     throw new Error(`Unable to load ${path}`);
+  }
+
+  /**
+   * Build a pool to rank over.
+   *
+   * The `latest` listing is the source that matters: its rows carry real
+   * day/week view counters, whereas the precomputed home rails report zero for
+   * both. Home rails are folded in afterwards only to widen coverage.
+   */
+  private async getRankingPool(): Promise<ToonTopItem[]> {
+    const cached = this.pool;
+    if (cached && Date.now() - cached.at < 10 * 60 * 1000) {
+      return cached.items;
+    }
+
+    const items: ToonTopItem[] = [];
+    const seen = new Set<string>();
+    const absorb = (rows: ToonTopItem[] | undefined): void => {
+      for (const row of rows ?? []) {
+        if (row?.slug && !seen.has(row.slug)) {
+          seen.add(row.slug);
+          items.push(row);
+        }
+      }
+    };
+
+    for (const page of [1, 2, 3, 4, 5, 6]) {
+      try {
+        const listing = await this.getPageProps<{ items?: ToonTopItem[] }>(
+          "latest.json",
+          `?page=${page}`,
+        );
+        absorb(listing.items);
+      } catch {
+        // A missing page just means a smaller pool; the rails still work.
+      }
+    }
+
+    try {
+      const home = await this.getPageProps<Record<string, unknown>>("home.json");
+      for (const section of HOME_SECTIONS) {
+        absorb(home[section.prop] as ToonTopItem[] | undefined);
+      }
+    } catch {
+      // Optional widening only.
+    }
+
+    this.pool = { at: Date.now(), items };
+    return items;
   }
 
   private toSearchResult(item: ToonTopItem): SearchResultItem {
@@ -271,6 +325,11 @@ class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
         type:
           section.id === "hero" ? DiscoverSectionType.featured : DiscoverSectionType.simpleCarousel,
       })),
+      ...RANKED_SECTIONS.map((section) => ({
+        id: section.id,
+        title: section.title,
+        type: DiscoverSectionType.simpleCarousel,
+      })),
       { id: "latest", title: "Latest Updates", type: DiscoverSectionType.simpleCarousel },
       { id: "genres", title: "Genres", type: DiscoverSectionType.genres },
     ];
@@ -301,11 +360,22 @@ class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
 
     const page = paging?.page ?? 1;
     const home = HOME_SECTIONS.find((entry) => entry.id === section.id);
+    const ranked = RANKED_SECTIONS.find((entry) => entry.id === section.id);
 
     let items: ToonTopItem[];
     let pagination: ToonTopPagination | undefined;
 
-    if (home) {
+    if (ranked) {
+      const pool = await this.getRankingPool();
+      items = [...pool]
+        .filter((item) => scoreOf(item, ranked.by) > 0)
+        .sort((a, b) => {
+          const delta = scoreOf(b, ranked.by) - scoreOf(a, ranked.by);
+          // Ratings tie constantly, so fall back to overall views.
+          return delta !== 0 ? delta : (b.stats?.views ?? 0) - (a.stats?.views ?? 0);
+        })
+        .slice(0, 40);
+    } else if (home) {
       // Every home rail is delivered in one payload, so it does not paginate.
       const props = await this.getPageProps<Record<string, ToonTopItem[]>>("home.json");
       items = props[home.prop] ?? [];
@@ -343,11 +413,12 @@ class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
           ...(subtitle ? { subtitle } : {}),
         };
       }),
-      metadata: home
-        ? { completed: true }
-        : hasMore(pagination, page)
-          ? { page: page + 1 }
-          : { completed: true },
+      metadata:
+        home || ranked
+          ? { completed: true }
+          : hasMore(pagination, page)
+            ? { page: page + 1 }
+            : { completed: true },
     };
   }
 
@@ -366,6 +437,15 @@ function chapterNumber(entry: { number?: number; name: string }): number {
 
   const parsed = Number(/([\d.]+)/.exec(entry.name)?.[1]);
   return isNaN(parsed) ? 0 : parsed;
+}
+
+/** Rank value for a pooled row, tolerating the fields the site omits. */
+function scoreOf(item: ToonTopItem, by: keyof ToonTopStats | "rating"): number {
+  if (by === "rating") {
+    return item.rating ?? 0;
+  }
+
+  return item.stats?.[by] ?? 0;
 }
 
 function hasMore(pagination: ToonTopPagination | undefined, page: number): boolean {
