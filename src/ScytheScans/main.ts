@@ -49,9 +49,17 @@ const READER_SCRIPT = `
         }
       }
 
-      return JSON.stringify(images);
+      return JSON.stringify({
+        images: images,
+        readerPresent: !!window.ts_reader,
+        paramsPresent: !!(window.ts_reader && window.ts_reader.params),
+        sourceCount: sources ? sources.length : 0,
+        readerAreaImgs: document.querySelectorAll('#readerarea img').length,
+        scripts: document.querySelectorAll('script').length,
+        readyState: document.readyState,
+      });
     } catch (error) {
-      return '[]';
+      return JSON.stringify({ images: [], error: String(error) });
     }
   })()
 `;
@@ -86,9 +94,10 @@ class ScytheScansExtension extends MangaStreamGeneric {
       storage: { cookies: this.cookieStorageInterceptor.cookies as never },
     });
 
-    const pages = parsePages(result);
+    const { pages, diagnostics } = parseReport(result);
     if (pages.length === 0) {
-      throw new Error(`Unable to read any pages for chapter ${chapter.chapterId}`);
+      // Surface what the webview saw; without it a failure here is opaque.
+      throw new Error(`Unable to read any pages for chapter ${chapter.chapterId} [${diagnostics}]`);
     }
 
     return {
@@ -119,23 +128,51 @@ class ScytheScansExtension extends MangaStreamGeneric {
   }
 }
 
-/** The webview hands back a JSON string, but tolerate an array as well. */
-function parsePages(result: unknown): string[] {
+/**
+ * The webview replies with a JSON report. Older shapes returned a bare array,
+ * so tolerate that too.
+ */
+function parseReport(result: unknown): { pages: string[]; diagnostics: string } {
   let raw: unknown = result;
 
   if (typeof raw === "string") {
+    const length = raw.length;
     try {
       raw = JSON.parse(raw);
     } catch {
-      return [];
+      return { pages: [], diagnostics: `unparsable reply of ${length} chars` };
     }
   }
 
-  if (!Array.isArray(raw)) {
-    return [];
+  if (Array.isArray(raw)) {
+    return {
+      pages: raw.filter((page): page is string => typeof page === "string"),
+      diagnostics: "",
+    };
   }
 
-  return raw.filter((page): page is string => typeof page === "string" && page.length > 0);
+  if (!raw || typeof raw !== "object") {
+    return { pages: [], diagnostics: `reply was ${raw === undefined ? "undefined" : typeof raw}` };
+  }
+
+  const report = raw as Record<string, unknown>;
+  const pages = Array.isArray(report["images"])
+    ? (report["images"] as unknown[]).filter((page): page is string => typeof page === "string")
+    : [];
+
+  const diagnostics = [
+    `reader=${String(report["readerPresent"])}`,
+    `params=${String(report["paramsPresent"])}`,
+    `sources=${String(report["sourceCount"])}`,
+    `readerAreaImgs=${String(report["readerAreaImgs"])}`,
+    `scripts=${String(report["scripts"])}`,
+    `readyState=${String(report["readyState"])}`,
+    report["error"] ? `error=${JSON.stringify(report["error"])}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return { pages, diagnostics };
 }
 
 export const ScytheScans = new ScytheScansExtension();
