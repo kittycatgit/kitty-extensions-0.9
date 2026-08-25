@@ -37,7 +37,6 @@ import {
   OBJECTING_UNTIL_KEY,
   buildChapterMintInject,
   chapterCacheKey,
-  pageMarkerUrl,
   readerUrl,
   type OniSagaSearchMetadata,
 } from "./models";
@@ -125,12 +124,6 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     const $ = await this.fetch(`/manga/${sourceManga.mangaId}`);
     const chapters = parseChapters($, sourceManga);
 
-    // The reader token is minted per chapter from its own reader page, so the
-    // interceptor needs to know which series each chapter belongs to.
-    for (const chapter of chapters) {
-      this.interceptor.noteChapterOwner(chapter.chapterId, sourceManga.mangaId);
-    }
-
     return chapters;
   }
 
@@ -148,7 +141,6 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
     const mangaId = chapter.sourceManga.mangaId;
     const chapterId = chapter.chapterId;
-    this.interceptor.noteChapterOwner(chapterId, mangaId);
 
     // A chapter resolved minutes ago is served straight from state - flipping
     // back to it, or re-opening after a mistap, costs nothing.
@@ -209,56 +201,46 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
       );
     }
 
-    // Hand the token over so the reader's own path does not fetch this page
-    // again for one, and count this request against the pacing clock.
-    this.interceptor.noteToken(chapterId, token);
-    this.interceptor.noteMeteredRequest();
-
     const outcome = await runExclusive(() => this.mintViaWebView(url, chapterId, token, total));
 
-    const pages: string[] = [];
-    let complete = false;
-
-    if (outcome) {
-      const odd = Object.keys(outcome.odd ?? {}).length
-        ? `, odd=${JSON.stringify(outcome.odd)}`
-        : "";
-      console.log(
-        `[OniSaga] webview minted ${outcome.got}/${total} pages in ${outcome.ms}ms, r429=${outcome.r429}, r403=${outcome.r403}, refreshes=${outcome.refreshes}, concurrency ${outcome.conc}${odd}`,
+    if (!outcome) {
+      throw new Error(
+        `Chapter ${chapterId} could not be loaded just now. Open it again in a moment.`,
       );
-
-      this.recordMints(outcome.got ?? 0);
-
-      if (outcome.token) {
-        this.interceptor.noteToken(chapterId, outcome.token);
-      }
-
-      if ((outcome.r429 ?? 0) > 0) {
-        Application.setState(Date.now() + OBJECTING_COOLDOWN_MS, OBJECTING_UNTIL_KEY);
-      }
-
-      complete = true;
-
-      for (let index = 0; index < total; index += 1) {
-        const resolved = outcome.urls?.[index];
-
-        if (!resolved) {
-          complete = false;
-        }
-
-        pages.push(resolved ?? pageMarkerUrl(chapterId, index));
-      }
-    } else {
-      for (let index = 0; index < total; index += 1) {
-        pages.push(pageMarkerUrl(chapterId, index));
-      }
     }
 
-    if (complete) {
-      // Stamped from when minting began, since that is when the addresses'
-      // ten-minute signatures started to tick.
-      this.cacheChapter(chapterId, pages, Date.now() - (outcome?.ms ?? 0));
+    const odd = Object.keys(outcome.odd ?? {}).length ? `, odd=${JSON.stringify(outcome.odd)}` : "";
+    console.log(
+      `[OniSaga] minted ${outcome.got}/${total} pages in ${outcome.ms}ms, r429=${outcome.r429}, r403=${outcome.r403}, refreshes=${outcome.refreshes}, concurrency ${outcome.conc}${odd}`,
+    );
+
+    this.recordMints(outcome.got ?? 0);
+
+    if ((outcome.r429 ?? 0) > 0) {
+      Application.setState(Date.now() + OBJECTING_COOLDOWN_MS, OBJECTING_UNTIL_KEY);
     }
+
+    const pages: string[] = [];
+
+    for (let index = 0; index < total; index += 1) {
+      const resolved = outcome.urls?.[index];
+
+      // Every page comes from the one place, or the chapter is not opened. A
+      // half-resolved chapter used to be papered over with a second, far slower
+      // way of fetching the rest, and that quiet hand-off is what turned a
+      // ten-second open into minutes without ever saying so.
+      if (!resolved) {
+        throw new Error(
+          `Only ${outcome.got} of ${total} pages of chapter ${chapterId} could be loaded. Open it again in a moment.`,
+        );
+      }
+
+      pages.push(resolved);
+    }
+
+    // Stamped from when minting began, since that is when the addresses'
+    // ten-minute signatures started to tick.
+    this.cacheChapter(chapterId, pages, Date.now() - (outcome.ms ?? 0));
 
     return { id: chapterId, mangaId, pages };
   }
