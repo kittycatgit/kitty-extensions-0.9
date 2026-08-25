@@ -238,6 +238,11 @@ return new Promise(function (resolve) {
           return null;
         }
         if (r.status !== 200) { return null; }
+        // The token rolls forward: each reply carries the next one to use. Ride
+        // it so the token never runs dry mid-chapter, which is what avoids the
+        // 403s and the costly reader-page refetches on a long read.
+        var next = r.headers.get("x-reader-token-next");
+        if (next) { token = next; }
         return r.json().then(function (j) {
           if (j && j.url) { results[idx] = j.url; got += 1; }
           cleanStreak += 1;
