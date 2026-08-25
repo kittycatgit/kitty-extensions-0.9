@@ -110,7 +110,24 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
         0,
     );
 
-    if (!Number.isFinite(declared) || declared <= 0) {
+    let total = Number.isFinite(declared) && declared > 0 ? declared : 0;
+
+    if (total <= 0) {
+      // The reader page did not say, so ask the site directly. It also reports
+      // whether the chapter is still being imported, which is the honest
+      // reason an otherwise fine chapter has no pages to show yet.
+      const info = await this.interceptor.chapterInfo(chapter.chapterId, token);
+
+      if (info?.importing) {
+        throw new Error(
+          `The site is still importing chapter ${chapter.chapterId}. Give it a minute and open it again.`,
+        );
+      }
+
+      total = info?.total ?? 0;
+    }
+
+    if (total <= 0) {
       throw new Error(
         `Chapter ${chapter.chapterId} reports no pages. It may have been removed, or the site may still be working on it.`,
       );
@@ -123,7 +140,7 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     this.interceptor.noteMeteredRequest();
 
     const pages: string[] = [];
-    for (let index = 0; index < declared; index += 1) {
+    for (let index = 0; index < total; index += 1) {
       pages.push(pageMarkerUrl(chapter.chapterId, index));
     }
 

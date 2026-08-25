@@ -57,6 +57,19 @@ export function parsePageMarker(url: string): { chapterId: string; index: number
   return match ? { chapterId: match[1]!, index: Number(match[2]) } : undefined;
 }
 
+/**
+ * Reports a chapter's length and whether the site has finished preparing it.
+ *
+ * Its `pages` array is always empty - there is no way to fetch every page's
+ * address at once, and an address cannot be guessed either, since an unsigned
+ * one is refused. So a page still costs a call. What this does give is an
+ * authoritative length and an `importing` flag, which is what a chapter the
+ * site is still working on reports.
+ */
+export function pagesInfoUrl(chapterId: string): string {
+  return `${DOMAIN}/api/chapter/${chapterId}/pages`;
+}
+
 /** The reader API the site itself calls, one page at a time. */
 export function pageApiUrl(chapterId: string, index: number): string {
   return `${DOMAIN}/api/chapter/${chapterId}/page/${index}`;

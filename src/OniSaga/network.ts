@@ -32,6 +32,7 @@ import {
   STREAK_KEY,
   USER_AGENT,
   pageApiUrl,
+  pagesInfoUrl,
   parsePageMarker,
   readerUrl,
   SIGNED_URL_TTL_MS,
@@ -117,6 +118,43 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
    */
   noteToken(chapterId: string, token: string): void {
     Application.setState({ token, at: Date.now() } satisfies CachedToken, tokenKey(chapterId));
+  }
+
+  /**
+   * Asks the site how long a chapter is and whether it is ready.
+   *
+   * Used only when the reader page does not say, so an ordinary chapter costs
+   * nothing extra and an awkward one still opens.
+   */
+  async chapterInfo(
+    chapterId: string,
+    token: string,
+  ): Promise<{ total: number; importing: boolean } | undefined> {
+    try {
+      const [response, buffer] = await Application.scheduleRequest({
+        url: pagesInfoUrl(chapterId),
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          [READER_TOKEN_HEADER]: token,
+          referer: `${DOMAIN}/`,
+          "user-agent": USER_AGENT,
+        },
+      });
+
+      if (response.status !== 200) {
+        return undefined;
+      }
+
+      const body = JSON.parse(Application.arrayBufferToUTF8String(buffer)) as {
+        total_pages?: number;
+        importing?: boolean;
+      };
+
+      return { total: Number(body.total_pages ?? 0), importing: body.importing === true };
+    } catch {
+      return undefined;
+    }
   }
 
   /** Records a metered request made elsewhere, so pacing accounts for it. */
