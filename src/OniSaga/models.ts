@@ -103,7 +103,7 @@ export const READER_TOKEN_HEADER = "X-Reader-Token";
  * without a rate-limit header and answer a back-to-back burst cleanly, so a
  * page costs one metered request, not two.
  */
-export const PAGE_REQUEST_GAP_MS = 1800;
+export const PAGE_REQUEST_GAP_MS = 2000;
 
 /**
  * Floor for the tuned gap.
@@ -112,23 +112,13 @@ export const PAGE_REQUEST_GAP_MS = 1800;
  * is a couple of minutes rather than the better part of ten - while still
  * leaving a gap between calls.
  */
-export const MIN_PAGE_GAP_MS = 900;
+export const MIN_PAGE_GAP_MS = 1600;
 
 export const MAX_PAGE_GAP_MS = 6000;
 export const GAP_INCREASE_MS = 750;
-export const GAP_DECAY_MS = 300;
+export const GAP_DECAY_MS = 150;
 /** Consecutive successes before easing the gap back down. */
-export const GAP_DECAY_AFTER = 5;
-
-/**
- * While no refusal has been seen yet, ease down in larger steps.
- *
- * Starting cautious and creeping down in small steps means a short chapter can
- * finish before the pace ever reaches what the site would have allowed. Until
- * there is a wall to respect, the pace closes on it quickly.
- */
-export const GAP_DECAY_FAST_MS = 600;
-export const GAP_DECAY_FAST_AFTER = 2;
+export const GAP_DECAY_AFTER = 6;
 
 /**
  * A refused page is retried rather than abandoned.
@@ -173,7 +163,7 @@ export const LAST_REFUSAL_KEY = "onisaga.lastRefusal";
 export const REFUSAL_EPISODE_MS = 12_000;
 
 /** How far clear of a known refusal the pace is allowed to settle. */
-export const KNOWN_BAD_MARGIN_MS = 300;
+export const KNOWN_BAD_MARGIN_MS = 500;
 
 export const GAP_KEY = "onisaga.gap";
 export const STREAK_KEY = "onisaga.streak";
