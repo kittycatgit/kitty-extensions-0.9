@@ -24,8 +24,9 @@ import {
   HOME_SECTIONS,
   USER_AGENT,
   WEBVIEW_BUDGET_MS,
-  WEBVIEW_GAP_MS,
+  WEBVIEW_MAX_CONCURRENCY,
   WEBVIEW_PAGE_CAP,
+  WEBVIEW_START_CONCURRENCY,
   buildPageResolverInject,
   pageMarkerUrl,
   readerUrl,
@@ -153,9 +154,8 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     const batch = await this.resolveViaWebView(mangaId, chapter.chapterId, token, total);
 
     if (batch) {
-      const got = batch.urls.filter(Boolean).length;
       console.log(
-        `[OniSaga] webview resolved ${got}/${batch.done} of ${total} pages in ${batch.ms}ms, rateLimited=${batch.rateLimited}`,
+        `[OniSaga] webview resolved ${batch.got}/${Math.min(total, WEBVIEW_PAGE_CAP)} of ${total} pages in ${batch.ms}ms, r429=${batch.r429}, concurrency settled at ${batch.conc}`,
       );
     } else {
       console.log(`[OniSaga] webview unavailable; ${total} pages will resolve lazily`);
@@ -181,7 +181,7 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     chapterId: string,
     token: string,
     total: number,
-  ): Promise<{ urls: (string | null)[]; done: number; rateLimited: boolean; ms: number } | null> {
+  ): Promise<{ urls: (string | null)[]; got: number; r429: number; conc: number; ms: number } | null> {
     const url = readerUrl(mangaId, chapterId);
 
     try {
@@ -198,7 +198,8 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
           token,
           total,
           WEBVIEW_PAGE_CAP,
-          WEBVIEW_GAP_MS,
+          WEBVIEW_START_CONCURRENCY,
+          WEBVIEW_MAX_CONCURRENCY,
           WEBVIEW_BUDGET_MS,
         ),
         storage: { cookies: this.cookieStorage.cookiesForUrl(url) },
@@ -213,8 +214,9 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
 
       return JSON.parse(String(outcome.result)) as {
         urls: (string | null)[];
-        done: number;
-        rateLimited: boolean;
+        got: number;
+        r429: number;
+        conc: number;
         ms: number;
       };
     } catch {

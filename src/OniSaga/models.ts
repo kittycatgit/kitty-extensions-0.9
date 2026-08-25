@@ -94,22 +94,32 @@ export const READER_TOKEN_HEADER = "X-Reader-Token";
  * in hand; the rest stay lazy markers the interceptor resolves as it reaches
  * them. Kept modest so the reader still opens quickly if the batch is slow.
  */
-export const WEBVIEW_PAGE_CAP = 20;
-export const WEBVIEW_GAP_MS = 250;
-export const WEBVIEW_BUDGET_MS = 6500;
+export const WEBVIEW_PAGE_CAP = 80;
+export const WEBVIEW_START_CONCURRENCY = 3;
+export const WEBVIEW_MAX_CONCURRENCY = 6;
+export const WEBVIEW_BUDGET_MS = 15_000;
 
 /**
- * Builds the script the WebView runs: a paced loop that resolves each page's
- * signed address through the same API the site's own reader calls, stopping at
- * the cap, the time budget, or the first refusal. It returns a Promise -
- * Paperback awaits it - that resolves with a JSON summary the caller parses.
+ * Builds the script the WebView runs: an adaptive worker pool that resolves the
+ * chapter's page addresses through the same API the site's own reader calls.
+ *
+ * The WebView is not held to the app client's harsh limit, so it need not crawl
+ * one page at a time - it runs several fetches at once. It starts cautious,
+ * widens the concurrency while every reply is clean, and on any refusal drops
+ * straight back to one at a time and waits out the stated penalty; a page that
+ * is refused is requeued a few times, and a penalty long enough to be a real
+ * cooldown abandons the rest to the lazy path, which is built to sit those out.
+ * It returns a Promise - Paperback awaits it - resolving with a JSON summary
+ * (the ordered URLs plus how many landed, how many were refused, and the
+ * concurrency it settled on) that the caller parses and, in the log, reads.
  */
 export function buildPageResolverInject(
   chapterId: string,
   token: string,
   total: number,
   cap: number,
-  gapMs: number,
+  startConcurrency: number,
+  maxConcurrency: number,
   budgetMs: number,
 ): string {
   return `
@@ -117,35 +127,78 @@ return new Promise(function (resolve) {
   var CID = ${JSON.stringify(chapterId)};
   var TOK = ${JSON.stringify(token)};
   var LIMIT = Math.min(${total}, ${cap});
-  var GAP = ${gapMs};
+  var MAX_C = ${maxConcurrency};
   var BUDGET = ${budgetMs};
   var HEADER = ${JSON.stringify(READER_TOKEN_HEADER)};
-  var urls = [];
-  var i = 0;
-  var rateLimited = false;
+  var LONG_PENALTY = 10000;
+  var results = new Array(LIMIT).fill(null);
+  var queue = [];
+  for (var k = 0; k < LIMIT; k += 1) { queue.push(k); }
+  var conc = ${startConcurrency};
+  var got = 0;
+  var r429 = 0;
+  var running = 0;
+  var cleanStreak = 0;
+  var attempts = {};
+  var pauseUntil = 0;
   var started = Date.now();
+  var finished = false;
+  var resumePending = false;
+
   function finish() {
-    resolve(JSON.stringify({ urls: urls, done: i, rateLimited: rateLimited, ms: Date.now() - started }));
+    if (finished) { return; }
+    finished = true;
+    resolve(JSON.stringify({ urls: results, got: got, r429: r429, conc: conc, ms: Date.now() - started }));
   }
-  function step() {
-    if (i >= LIMIT || Date.now() - started > BUDGET) { finish(); return; }
+
+  function tick() {
+    if (finished) { return; }
+    if (Date.now() - started > BUDGET) { finish(); return; }
+    if (queue.length === 0 && running === 0) { finish(); return; }
+    var paused = Date.now() < pauseUntil;
+    while (!paused && running < conc && queue.length > 0) {
+      run(queue.shift());
+    }
+    if (paused && running === 0 && !resumePending) {
+      resumePending = true;
+      setTimeout(function () { resumePending = false; tick(); }, Math.min(Math.max(pauseUntil - Date.now() + 20, 20), 2000));
+    }
+  }
+
+  function run(idx) {
+    running += 1;
     var headers = { accept: "application/json" };
     headers[HEADER] = TOK;
-    fetch("/api/chapter/" + CID + "/page/" + i, { headers: headers })
+    fetch("/api/chapter/" + CID + "/page/" + idx, { headers: headers })
       .then(function (r) {
-        if (r.status === 429 || r.headers.get("cf-mitigated")) { rateLimited = true; return "STOP"; }
+        if (r.status === 429 || r.headers.get("cf-mitigated")) {
+          r429 += 1;
+          cleanStreak = 0;
+          conc = 1;
+          var ra = parseInt(r.headers.get("retry-after") || "0", 10) * 1000;
+          if (ra > LONG_PENALTY) { queue.length = 0; return null; }
+          pauseUntil = Date.now() + (ra > 0 ? ra : 1200);
+          attempts[idx] = (attempts[idx] || 0) + 1;
+          if (attempts[idx] <= 4) { queue.push(idx); }
+          return null;
+        }
         if (r.status !== 200) { return null; }
-        return r.json();
+        return r.json().then(function (j) {
+          if (j && j.url) { results[idx] = j.url; got += 1; }
+          cleanStreak += 1;
+          if (cleanStreak % 5 === 0 && conc < MAX_C && Date.now() >= pauseUntil) { conc += 1; }
+        });
       })
-      .then(function (payload) {
-        if (payload === "STOP") { finish(); return; }
-        urls.push(payload && payload.url ? payload.url : null);
-        i += 1;
-        setTimeout(step, GAP);
+      .catch(function () {
+        // A dropped connection under load is not a refusal - retry it a few
+        // times rather than surrender the page to the slow lazy path.
+        attempts[idx] = (attempts[idx] || 0) + 1;
+        if (attempts[idx] <= 4) { queue.push(idx); }
       })
-      .catch(function () { urls.push(null); i += 1; setTimeout(step, GAP); });
+      .then(function () { running -= 1; tick(); });
   }
-  step();
+
+  tick();
 });
 `;
 }
