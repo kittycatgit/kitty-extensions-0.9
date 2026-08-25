@@ -34,6 +34,7 @@ import {
   WEBVIEW_START_CONCURRENCY,
   MINTS_KEY,
   MINT_BUDGET,
+  MINT_CEILING,
   MINT_WINDOW_MS,
   OBJECTING_COOLDOWN_MS,
   OBJECTING_UNTIL_KEY,
@@ -588,6 +589,10 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
   ): Promise<WebViewChapterOutcome | null> {
     const url = readerUrl(mangaId, chapterId);
 
+    // How much the site's window can still take at full speed. When a heavy
+    // read has spent it, the pool paces itself down rather than trip a refusal.
+    const burstBudget = Math.max(0, MINT_CEILING - this.recentMints());
+
     try {
       const outcome = await Application.executeInWebView({
         source: {
@@ -604,6 +609,7 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
           WEBVIEW_START_CONCURRENCY,
           WEBVIEW_MAX_CONCURRENCY,
           WEBVIEW_BUDGET_MS,
+          burstBudget,
         ),
         storage: { cookies: this.cookieStorage.cookiesForUrl(url) },
       });

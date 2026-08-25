@@ -137,9 +137,17 @@ export function chapterListKey(mangaId: string): string {
  * mints in a couple of minutes, so a prefetch checks how many addresses have
  * been minted lately and stands down if adding a chapter's worth would crowd
  * that ceiling - the reader's own opens always come first. */
-export const MINT_WINDOW_MS = 100_000;
+export const MINT_WINDOW_MS = 120_000;
 export const MINT_BUDGET = 90;
 export const MINTS_KEY = "onisaga.mints";
+
+/** Roughly how many addresses the site will mint for one reader inside the
+ * window before it starts refusing (with a long penalty). A chapter open
+ * bursts freely up to whatever of this is left, then paces itself down to a
+ * sustainable one-at-a-time crawl so a heavy reader glides under the ceiling
+ * instead of slamming into it and stalling for minutes. Kept conservatively
+ * below where a device log first saw refusals (~150). */
+export const MINT_CEILING = 130;
 
 /** When a resolve meets a 429 the site is actively objecting; no prefetch runs
  * for a while afterwards so the reader's next open is not made to share the
@@ -171,6 +179,7 @@ export function buildChapterResolverInject(
   startConcurrency: number,
   maxConcurrency: number,
   budgetMs: number,
+  burstBudget: number,
 ): string {
   return `
 return new Promise(function (resolve) {
@@ -230,6 +239,10 @@ return new Promise(function (resolve) {
     // The budget meters page resolution alone - the reader-page discovery that
     // ran before this point must not eat into a long chapter's tail.
     var poolStarted = Date.now();
+    // How many more addresses may be minted at full speed before the site's
+    // window is near its ceiling; past it, the pool holds one-at-a-time, a rate
+    // the site sustains, so a heavy read slows rather than trips.
+    var BURST_BUDGET = ${burstBudget};
     var LIMIT = Math.min(total, CAP);
     var MAX_REFRESHES = Math.ceil(LIMIT / 25) + 3;
     var refreshing = null;
@@ -287,6 +300,9 @@ return new Promise(function (resolve) {
       if (finished) { return; }
       if (Date.now() - poolStarted > BUDGET) { finish(); return; }
       if (queue.length === 0 && running === 0) { finish(); return; }
+      // Once the window's burst budget is spent, hold to one request at a time.
+      var ceilNow = got < BURST_BUDGET ? MAX_C : 1;
+      if (conc > ceilNow) { conc = ceilNow; }
       var paused = Date.now() < pauseUntil;
       while (!paused && running < conc && queue.length > 0) {
         run(queue.shift());
@@ -347,7 +363,9 @@ return new Promise(function (resolve) {
             results[idx] = j.url;
             got += 1;
             cleanStreak += 1;
-            if (cleanStreak % 6 === 0 && conc < MAX_C && Date.now() >= pauseUntil) { conc += 1; }
+            if (cleanStreak % 6 === 0 && conc < MAX_C && got < BURST_BUDGET && Date.now() >= pauseUntil) {
+              conc += 1;
+            }
           });
         })
         .catch(function () {
