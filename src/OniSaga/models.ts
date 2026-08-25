@@ -94,10 +94,15 @@ export const READER_TOKEN_HEADER = "X-Reader-Token";
  * in hand; the rest stay lazy markers the interceptor resolves as it reaches
  * them. Kept modest so the reader still opens quickly if the batch is slow.
  */
-export const WEBVIEW_PAGE_CAP = 120;
+export const WEBVIEW_PAGE_CAP = 140;
 export const WEBVIEW_START_CONCURRENCY = 2;
 export const WEBVIEW_MAX_CONCURRENCY = 4;
-export const WEBVIEW_BUDGET_MS = 18_000;
+// Long chapters resolve at ~5 pages/s at the concurrency the phone holds without
+// dropping (4), so a 114-page chapter needs ~24s. The old 18s budget cut those
+// off and let the tail crawl in on the lazy path; ~26s covers a 114-page chapter
+// with margin. If the budget is reached the finished region is still contiguous
+// (requeues go to the front), so the reader gets a clean tail, never a hole.
+export const WEBVIEW_BUDGET_MS = 26_000;
 
 /**
  * Builds the script the WebView runs: an adaptive worker pool that resolves the
@@ -166,7 +171,12 @@ return new Promise(function (resolve) {
 
   function requeue(idx) {
     attempts[idx] = (attempts[idx] || 0) + 1;
-    if (attempts[idx] <= MAX_ATTEMPTS) { queue.push(idx); }
+    // Retry at the FRONT, not the back. A page refused for an expired token or
+    // dropped under load should resolve right away - as soon as the token is
+    // refreshed - so the finished region stays contiguous. Sent to the back it
+    // would land behind the whole chapter and, if the budget runs out first,
+    // become a hole in the middle while the pages after it loaded fine.
+    if (attempts[idx] <= MAX_ATTEMPTS) { queue.unshift(idx); }
   }
 
   function refreshToken() {
