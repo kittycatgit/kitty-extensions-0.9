@@ -3,7 +3,6 @@
 
 import {
   CloudflareError,
-  CookieStorageInterceptor,
   PaperbackInterceptor,
   type Request,
   type Response,
@@ -30,15 +29,6 @@ import {
   REFUSAL_EPISODE_MS,
   STREAK_KEY,
   USER_AGENT,
-  CHUNK_SIZE,
-  MINT_CEILING,
-  MINTS_KEY,
-  MINT_WINDOW_MS,
-  WEBVIEW_CHUNK_BUDGET_MS,
-  WEBVIEW_MAX_CONCURRENCY,
-  WEBVIEW_START_CONCURRENCY,
-  buildPageListResolverInject,
-  chapterTotalKey,
   pageApiUrl,
   pagesInfoUrl,
   parsePageMarker,
@@ -113,18 +103,8 @@ type CachedToken = { token: string; at: number };
 const isPageApi = (url: string): boolean => /\/api\/chapter\/\d+\/page\/\d+/.test(url);
 
 export class OniSagaInterceptor extends PaperbackInterceptor {
-  // Reads the same persisted cookie jar the extension writes, so the WebView
-  // that resolves a chunk carries the app's Cloudflare clearance.
-  private readonly cookieStorage = new CookieStorageInterceptor({ storage: "stateManager" });
-
   noteChapterOwner(chapterId: string, mangaId: string): void {
     Application.setState(mangaId, ownerKey(chapterId));
-  }
-
-  /** Remembers a chapter's length so the chunk resolver never asks the site
-   * for a page past the end. */
-  noteChapterTotal(chapterId: string, total: number): void {
-    Application.setState(total, chapterTotalKey(chapterId));
   }
 
   /**
@@ -239,18 +219,16 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
         if (this.cooldownRemaining() > 0) {
           refused = true;
         } else {
-          // Resolve the whole neighbourhood of this page in one WebView pass,
-          // at browser pace, and cache it. The reader's prefetch of the next
-          // page usually falls inside this chunk, so the following chunk is
-          // already resolving before the reader arrives - the wait is hidden.
-          const url = await this.resolveChunk(chapterId, index);
+          await this.pace();
+          const result = await this.mintPage(chapterId, index);
 
-          if (url) {
-            return url;
+          if (result.url) {
+            Application.setState({ url: result.url, at: Date.now() } satisfies CachedUrl, key);
+            return result.url;
           }
 
-          // A refusal or an empty result: loop to wait out any cooldown.
-          refused = true;
+          // A refusal set a cooldown; loop to wait it out, off the lock.
+          refused = result.refused;
         }
       } finally {
         resolving = false;
@@ -265,208 +243,6 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     throw new Error(
       `Page ${index + 1} could not be loaded after waiting out the site's rate limit.`,
     );
-  }
-
-  /**
-   * Resolves the chunk of pages beginning at `index` inside one WebView pass -
-   * the site treats a WebView as the browser it is, so a chunk mints at browser
-   * speed instead of the app client's throttled crawl - caches every address it
-   * gets, and returns the one the reader asked for. Falls back to a single
-   * app-client mint only when the WebView is unavailable, so an app build
-   * without it still turns a page.
-   */
-  private async resolveChunk(chapterId: string, index: number): Promise<string | undefined> {
-    const mangaId = Application.getState(ownerKey(chapterId)) as string | undefined;
-
-    if (!mangaId) {
-      return this.mintSingle(chapterId, index);
-    }
-
-    // Mint the neighbourhood of the requested page, but only the pages not
-    // already cached - so a chunk never re-mints a neighbour a previous chunk
-    // resolved, and a retry after a failure costs just the page that failed.
-    const total = Application.getState(chapterTotalKey(chapterId)) as number | undefined;
-    const end = total && total > index ? Math.min(index + CHUNK_SIZE, total) : index + CHUNK_SIZE;
-    const todo: number[] = [];
-
-    for (let i = index; i < end; i += 1) {
-      if (!this.cachedUrl(chapterId, i)) {
-        todo.push(i);
-      }
-    }
-
-    if (todo.length === 0) {
-      return this.cachedUrl(chapterId, index);
-    }
-
-    const seed = await this.tokenFor(chapterId);
-    const burstBudget = Math.max(0, MINT_CEILING - this.recentMints());
-    const outcome = await this.resolveChunkViaWebView(mangaId, chapterId, todo, seed, burstBudget);
-
-    if (!outcome) {
-      // No WebView here - fall back to a single paced app-client mint.
-      return this.mintSingle(chapterId, index);
-    }
-
-    // A challenge where a fresh token should be needs the proper bypass, not a
-    // silent retry - hand it up the way a challenge on any other page is.
-    if (outcome.cf) {
-      throw new CloudflareError(
-        {
-          url: DOMAIN,
-          method: "GET",
-          headers: { referer: `${DOMAIN}/`, "user-agent": USER_AGENT },
-        },
-        "Bot verification detected, bypass it to continue!",
-      );
-    }
-
-    if (outcome.got > 0) {
-      this.recordMints(outcome.got);
-    }
-
-    if (outcome.token) {
-      this.noteToken(chapterId, outcome.token);
-    }
-
-    const now = Date.now();
-    for (const key of Object.keys(outcome.pages)) {
-      Application.setState(
-        { url: outcome.pages[key]!, at: now } satisfies CachedUrl,
-        pageKey(chapterId, Number(key)),
-      );
-    }
-
-    const mine = outcome.pages[index];
-
-    if (mine) {
-      // The reader has their page. Even if the site objected to others in the
-      // chunk, it recovered, so do not slow the pages still to come.
-      return mine;
-    }
-
-    // The requested page did not resolve. Set the shared cooldown so the retry
-    // waits instead of spinning - the real Retry-After if the site refused,
-    // otherwise a short breath for a transient error - then report the refusal.
-    this.widenGap("rate limited");
-    this.block(outcome.r429 > 0 ? Math.max(outcome.ra, DEFAULT_RETRY_AFTER_MS) : 3_000);
-    return undefined;
-  }
-
-  /** A page's cached address if it is still within its signed lifetime. */
-  private cachedUrl(chapterId: string, index: number): string | undefined {
-    const cached = Application.getState(pageKey(chapterId, index)) as CachedUrl | undefined;
-    return cached && Date.now() - cached.at < SIGNED_URL_TTL_MS ? cached.url : undefined;
-  }
-
-  /**
-   * Runs the range resolver inside a WebView. Returns its summary, or null when
-   * the WebView is unavailable (older app builds answer "Not Implemented"), so
-   * the caller can fall back to the app-client path.
-   */
-  private async resolveChunkViaWebView(
-    mangaId: string,
-    chapterId: string,
-    indices: number[],
-    seed: string,
-    burstBudget: number,
-  ): Promise<{
-    pages: Record<string, string>;
-    token?: string;
-    got: number;
-    r429: number;
-    ra: number;
-    cf: boolean;
-  } | null> {
-    const url = readerUrl(mangaId, chapterId);
-
-    try {
-      const outcome = await Application.executeInWebView({
-        source: {
-          html: "<html><head></head><body></body></html>",
-          baseUrl: url,
-          loadCSS: false,
-          loadImages: false,
-          userAgent: USER_AGENT,
-        },
-        inject: buildPageListResolverInject(
-          chapterId,
-          url,
-          indices,
-          seed,
-          WEBVIEW_START_CONCURRENCY,
-          WEBVIEW_MAX_CONCURRENCY,
-          WEBVIEW_CHUNK_BUDGET_MS,
-          burstBudget,
-        ),
-        storage: { cookies: this.cookieStorage.cookiesForUrl(url) },
-      });
-
-      for (const cookie of outcome.storage.cookies) {
-        if (!cookie.expires || cookie.expires.getTime() > Date.now()) {
-          this.cookieStorage.setCookie(cookie);
-        }
-      }
-
-      const parsed = JSON.parse(String(outcome.result)) as {
-        pages?: Record<string, string>;
-        token?: string;
-        got?: number;
-        r429?: number;
-        ra?: number;
-        cf?: boolean;
-      };
-
-      return {
-        pages: parsed.pages ?? {},
-        token: parsed.token,
-        got: parsed.got ?? 0,
-        r429: parsed.r429 ?? 0,
-        ra: parsed.ra ?? 0,
-        cf: parsed.cf === true,
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  /** The app-client single-page mint, used only when a WebView is unavailable. */
-  private async mintSingle(chapterId: string, index: number): Promise<string | undefined> {
-    await this.pace();
-    const result = await this.mintPage(chapterId, index);
-
-    if (result.url) {
-      Application.setState(
-        { url: result.url, at: Date.now() } satisfies CachedUrl,
-        pageKey(chapterId, index),
-      );
-      return result.url;
-    }
-
-    return undefined;
-  }
-
-  /** Page mints recorded within the recent window, so the chunk resolver keeps
-   * clear of the site's burst ceiling the same way an open does. */
-  private recentMints(): number {
-    const marks =
-      (Application.getState(MINTS_KEY) as { at: number; n: number }[] | undefined) ?? [];
-    const cutoff = Date.now() - MINT_WINDOW_MS;
-    return marks.filter((m) => m.at >= cutoff).reduce((sum, m) => sum + m.n, 0);
-  }
-
-  /** Records a burst of mints against the recent window. */
-  private recordMints(n: number): void {
-    if (n <= 0) {
-      return;
-    }
-
-    const cutoff = Date.now() - MINT_WINDOW_MS;
-    const marks = (
-      (Application.getState(MINTS_KEY) as { at: number; n: number }[] | undefined) ?? []
-    ).filter((m) => m.at >= cutoff);
-    marks.push({ at: Date.now(), n });
-    Application.setState(marks, MINTS_KEY);
   }
 
   /** Waits out an active penalty, one bounded step, without holding the lock. */
