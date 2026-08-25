@@ -162,6 +162,14 @@ export const LAST_REFUSAL_KEY = "onisaga.lastRefusal";
  */
 export const REFUSAL_EPISODE_MS = 12_000;
 
+/**
+ * A rate-limit penalty up to this long is waited out; a longer one fails the
+ * page immediately so the reader stays responsive and the app fetches it again
+ * later. Blocking every page behind one page's minute-long penalty is what made
+ * a single refusal freeze the whole chapter.
+ */
+export const COOLDOWN_WAIT_CAP_MS = 5000;
+
 /** How far clear of a known refusal the pace is allowed to settle. */
 export const KNOWN_BAD_MARGIN_MS = 500;
 

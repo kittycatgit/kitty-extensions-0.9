@@ -20,9 +20,8 @@ import {
   KNOWN_BAD_MARGIN_MS,
   LAST_REFUSAL_KEY,
   MAX_PAGE_GAP_MS,
-  MAX_RETRY_WAIT_MS,
+  COOLDOWN_WAIT_CAP_MS,
   MIN_PAGE_GAP_MS,
-  MAX_SLOT_LOOKAHEAD_MS,
   PAGE_REQUEST_GAP_MS,
   PAGE_RETRY_ATTEMPTS,
   READER_TOKEN_HEADER,
@@ -198,6 +197,10 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
       return cached.url;
     }
 
+    // Cooldown is checked before the lock, so a page caught in a long penalty
+    // fails at once instead of holding every other page behind it.
+    this.awaitShortCooldownOrFail(index);
+
     await lock(PAGE_LOCK);
     resolving = true;
     try {
@@ -207,6 +210,8 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
         return again.url;
       }
 
+      // It may have tripped while we queued for the lock.
+      this.failIfCoolingDown(index);
       await this.pace();
 
       const url = await this.mintPage(chapterId, index);
@@ -219,13 +224,40 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     }
   }
 
-  /** Waits out any cooldown and holds the minimum gap between real calls. */
-  private async pace(): Promise<void> {
-    const now = Date.now();
+  /** How long the shared cooldown still has to run. */
+  private cooldownRemaining(): number {
+    const until = (Application.getState(BLOCKED_UNTIL_KEY) as number | undefined) ?? 0;
+    return Math.max(until - Date.now(), 0);
+  }
 
-    const blockedUntil = (Application.getState(BLOCKED_UNTIL_KEY) as number | undefined) ?? 0;
-    if (blockedUntil > now && blockedUntil < now + MAX_SLOT_LOOKAHEAD_MS + CF_COOLDOWN_MS) {
-      await Application.sleep((blockedUntil - now) / 1000);
+  /**
+   * If a penalty is running, wait out a short one without the lock, or fail a
+   * long one at once. Either way one page's penalty never blocks the others.
+   */
+  private awaitShortCooldownOrFail(index: number): void {
+    const remaining = this.cooldownRemaining();
+
+    if (remaining > COOLDOWN_WAIT_CAP_MS) {
+      throw new Error(
+        `Page ${index + 1} is waiting out the site's rate limit; it will load on its own shortly.`,
+      );
+    }
+  }
+
+  /** Fails a page the moment a long penalty is in force. */
+  private failIfCoolingDown(index: number): void {
+    if (this.cooldownRemaining() > COOLDOWN_WAIT_CAP_MS) {
+      throw new Error(
+        `Page ${index + 1} is waiting out the site's rate limit; it will load on its own shortly.`,
+      );
+    }
+  }
+
+  /** Holds the minimum gap between real calls, plus a short cooldown if any. */
+  private async pace(): Promise<void> {
+    const shortCooldown = this.cooldownRemaining();
+    if (shortCooldown > 0 && shortCooldown <= COOLDOWN_WAIT_CAP_MS) {
+      await Application.sleep(shortCooldown / 1000);
     }
 
     const gap = this.currentGap();
@@ -369,17 +401,13 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
         continue;
       }
 
-      // Refused for pace: wait the shorter of what the site asked for and a
-      // cap, then try again. Giving up here is what used to leave a page
-      // permanently blank while its neighbours loaded.
+      // A refusal is recorded as a cooldown by requestPage. Do not sit here
+      // retrying under the lock - that is what froze every other page. Fail now
+      // and let the app fetch this page again once the cooldown has passed.
       if (result.status === 429 || result.cloudflare) {
-        const until = (Application.getState(BLOCKED_UNTIL_KEY) as number | undefined) ?? 0;
-        const wait = Math.min(Math.max(until - Date.now(), 0), MAX_RETRY_WAIT_MS);
-
-        if (attempt + 1 < PAGE_RETRY_ATTEMPTS) {
-          await Application.sleep(wait / 1000);
-          continue;
-        }
+        throw new Error(
+          `Page ${index + 1} of chapter ${chapterId} hit the site's rate limit; it will retry shortly.`,
+        );
       }
 
       break;
