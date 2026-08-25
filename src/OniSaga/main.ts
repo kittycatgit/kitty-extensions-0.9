@@ -90,22 +90,30 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     const [, buffer] = await Application.scheduleRequest({ url, method: "GET" });
     const html = Application.arrayBufferToUTF8String(buffer);
 
+    // Readiness first: a chapter the site has not finished preparing answers
+    // with a waiting screen rather than a reader, and saying so is far more
+    // use than complaining that its length cannot be read.
+    const token = html.match(/readerToken['"]?\s*:\s*['"]([^'"]{8,})['"]/)?.[1];
+    const preparing = /loading pages|hang tight|being processed|preparing/i.test(html);
+
+    if (!token || preparing) {
+      throw new Error(
+        `The site is still preparing chapter ${chapter.chapterId}. Give it a minute and open it again.`,
+      );
+    }
+
     const declared = Number(
-      html.match(/['"]?(?:pageCount|totalPages)['"]?\s*:\s*(\d+)/)?.[1] ??
-        html.match(/(\d+)\s*pages/i)?.[1] ??
+      html.match(/['"]?(?:pageCount|totalPages|pages_count)['"]?\s*:\s*(\d+)/)?.[1] ??
+        html.match(/(\d+)\s*pages\b/i)?.[1] ??
+        html.match(/data-pages=['"](\d+)['"]/)?.[1] ??
         chapter.additionalInfo?.pages ??
         0,
     );
 
     if (!Number.isFinite(declared) || declared <= 0) {
-      throw new Error(`Unable to tell how many pages chapter ${chapter.chapterId} has`);
-    }
-
-    // Fail here rather than on the first page if the reader is not serving.
-    const token = html.match(/readerToken['"]?\s*:\s*['"]([^'"]{8,})['"]/)?.[1];
-
-    if (!token) {
-      throw new Error("The chapter is not ready to read yet; try again shortly.");
+      throw new Error(
+        `Chapter ${chapter.chapterId} reports no pages. It may have been removed, or the site may still be working on it.`,
+      );
     }
 
     // Hand over the token from the page just fetched, so resolving the first

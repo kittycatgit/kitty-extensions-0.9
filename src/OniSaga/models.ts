@@ -108,6 +108,16 @@ export const GAP_DECAY_MS = 300;
 export const GAP_DECAY_AFTER = 5;
 
 /**
+ * While no refusal has been seen yet, ease down in larger steps.
+ *
+ * Starting cautious and creeping down in small steps means a short chapter can
+ * finish before the pace ever reaches what the site would have allowed. Until
+ * there is a wall to respect, the pace closes on it quickly.
+ */
+export const GAP_DECAY_FAST_MS = 600;
+export const GAP_DECAY_FAST_AFTER = 2;
+
+/**
  * A refused page is retried rather than abandoned.
  *
  * A single refusal used to fail that page for good, which is why a chapter

@@ -12,6 +12,8 @@ import {
   DEFAULT_RETRY_AFTER_MS,
   DOMAIN,
   GAP_DECAY_AFTER,
+  GAP_DECAY_FAST_AFTER,
+  GAP_DECAY_FAST_MS,
   GAP_DECAY_MS,
   GAP_INCREASE_MS,
   GAP_KEY,
@@ -290,16 +292,22 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
 
   /** Eases the gap back down once a run of requests has gone through cleanly. */
   private noteSuccess(): void {
+    // Before any refusal there is no wall to respect, so close on it quickly;
+    // afterwards move in smaller steps so the pace stays settled.
+    const explored = typeof Application.getState(KNOWN_BAD_KEY) === "number";
+    const after = explored ? GAP_DECAY_AFTER : GAP_DECAY_FAST_AFTER;
+    const step = explored ? GAP_DECAY_MS : GAP_DECAY_FAST_MS;
+
     const streak = ((Application.getState(STREAK_KEY) as number | undefined) ?? 0) + 1;
 
-    if (streak < GAP_DECAY_AFTER) {
+    if (streak < after) {
       Application.setState(streak, STREAK_KEY);
       return;
     }
 
     Application.setState(0, STREAK_KEY);
     const from = this.currentGap();
-    const eased = Math.max(from - GAP_DECAY_MS, this.safeFloor());
+    const eased = Math.max(from - step, this.safeFloor());
 
     if (eased !== from) {
       Application.setState(eased, GAP_KEY);
