@@ -155,7 +155,7 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
 
     if (batch) {
       console.log(
-        `[OniSaga] webview resolved ${batch.got}/${Math.min(total, WEBVIEW_PAGE_CAP)} of ${total} pages in ${batch.ms}ms, r429=${batch.r429}, concurrency settled at ${batch.conc}`,
+        `[OniSaga] webview resolved ${batch.got}/${Math.min(total, WEBVIEW_PAGE_CAP)} of ${total} pages in ${batch.ms}ms, r429=${batch.r429}, r403=${batch.r403}, refreshes=${batch.refreshes}, concurrency settled at ${batch.conc}`,
       );
     } else {
       console.log(`[OniSaga] webview unavailable; ${total} pages will resolve lazily`);
@@ -181,7 +181,15 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     chapterId: string,
     token: string,
     total: number,
-  ): Promise<{ urls: (string | null)[]; got: number; r429: number; conc: number; ms: number } | null> {
+  ): Promise<{
+    urls: (string | null)[];
+    got: number;
+    r429: number;
+    r403: number;
+    refreshes: number;
+    conc: number;
+    ms: number;
+  } | null> {
     const url = readerUrl(mangaId, chapterId);
 
     try {
@@ -196,6 +204,7 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
         inject: buildPageResolverInject(
           chapterId,
           token,
+          url,
           total,
           WEBVIEW_PAGE_CAP,
           WEBVIEW_START_CONCURRENCY,
@@ -216,6 +225,8 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
         urls: (string | null)[];
         got: number;
         r429: number;
+        r403: number;
+        refreshes: number;
         conc: number;
         ms: number;
       };
