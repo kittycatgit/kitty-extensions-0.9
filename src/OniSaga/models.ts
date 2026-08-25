@@ -63,23 +63,35 @@ export const READER_TOKEN_HEADER = "X-Reader-Token";
  * saved. This is the pace the site's own reader keeps.
  */
 /**
- * Starting gap between page requests.
+ * Pacing for page resolution, discovered at runtime rather than fixed.
  *
- * The published allowance (300) is barely touched — device logs showed it only
- * falling 293 to 284 while still earning a 429 — so the limit that actually
- * bites is a short-window burst rule whose size the site does not publish.
- * Each page also costs a second request for its image, so the domain sees
- * roughly double this rate. The gap therefore starts conservative and tunes
- * itself from there.
+ * The site throttles the app far more sharply than a browser: a no-gap burst
+ * of a dozen calls from a browser is answered cleanly, while the app earned
+ * refusals at a gap of a second and a half. The rate that applies to this
+ * device therefore cannot be measured from anywhere else, so the gap is
+ * treated as unknown - it starts cautious, widens whenever the site refuses,
+ * and settles back down while it does not.
+ *
+ * Only the resolution calls are throttled: the images themselves are served
+ * without a rate-limit header and answer a back-to-back burst cleanly, so a
+ * page costs one metered request, not two.
  */
-export const PAGE_REQUEST_GAP_MS = 2500;
+export const PAGE_REQUEST_GAP_MS = 1800;
 
-/** Bounds and step for the self-tuning gap. */
+/**
+ * Floor for the tuned gap.
+ *
+ * Low enough that a long chapter stays readable - a hundred pages at the floor
+ * is a couple of minutes rather than the better part of ten - while still
+ * leaving a gap between calls.
+ */
+export const MIN_PAGE_GAP_MS = 900;
+
 export const MAX_PAGE_GAP_MS = 6000;
 export const GAP_INCREASE_MS = 750;
-export const GAP_DECAY_MS = 250;
+export const GAP_DECAY_MS = 300;
 /** Consecutive successes before easing the gap back down. */
-export const GAP_DECAY_AFTER = 8;
+export const GAP_DECAY_AFTER = 5;
 
 export const GAP_KEY = "onisaga.gap";
 export const STREAK_KEY = "onisaga.streak";

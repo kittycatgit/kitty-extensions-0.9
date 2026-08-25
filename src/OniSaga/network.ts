@@ -16,6 +16,7 @@ import {
   GAP_INCREASE_MS,
   GAP_KEY,
   MAX_PAGE_GAP_MS,
+  MIN_PAGE_GAP_MS,
   MAX_SLOT_LOOKAHEAD_MS,
   PAGE_REQUEST_GAP_MS,
   READER_TOKEN_HEADER,
@@ -166,9 +167,12 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
   /** The gap in force, which rises after a refusal and eases back on success. */
   private currentGap(): number {
     const stored = Application.getState(GAP_KEY) as number | undefined;
-    return typeof stored === "number" && stored >= PAGE_REQUEST_GAP_MS
-      ? Math.min(stored, MAX_PAGE_GAP_MS)
-      : PAGE_REQUEST_GAP_MS;
+
+    if (typeof stored !== "number" || !Number.isFinite(stored)) {
+      return PAGE_REQUEST_GAP_MS;
+    }
+
+    return Math.min(Math.max(stored, MIN_PAGE_GAP_MS), MAX_PAGE_GAP_MS);
   }
 
   /**
@@ -194,7 +198,7 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     }
 
     Application.setState(0, STREAK_KEY);
-    const eased = Math.max(this.currentGap() - GAP_DECAY_MS, PAGE_REQUEST_GAP_MS);
+    const eased = Math.max(this.currentGap() - GAP_DECAY_MS, MIN_PAGE_GAP_MS);
     Application.setState(eased, GAP_KEY);
   }
 
