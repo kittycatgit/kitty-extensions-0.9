@@ -112,7 +112,7 @@ export const PAGE_REQUEST_GAP_MS = 2000;
  * is a couple of minutes rather than the better part of ten - while still
  * leaving a gap between calls.
  */
-export const MIN_PAGE_GAP_MS = 1600;
+export const MIN_PAGE_GAP_MS = 800;
 
 export const MAX_PAGE_GAP_MS = 6000;
 export const GAP_INCREASE_MS = 750;
@@ -129,7 +129,7 @@ export const GAP_DECAY_AFTER = 5;
  * creep toward what the connection actually allows; a fresh refusal pushes it
  * straight back.
  */
-export const REPROBE_AFTER = 12;
+export const REPROBE_AFTER = 6;
 
 /**
  * A refused page is retried rather than abandoned.
