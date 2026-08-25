@@ -15,10 +15,14 @@ import {
   GAP_DECAY_MS,
   GAP_INCREASE_MS,
   GAP_KEY,
+  HTML_GAP_MS,
+  HTML_LAST_AT_KEY,
   MAX_PAGE_GAP_MS,
+  MAX_RETRY_WAIT_MS,
   MIN_PAGE_GAP_MS,
   MAX_SLOT_LOOKAHEAD_MS,
   PAGE_REQUEST_GAP_MS,
+  PAGE_RETRY_ATTEMPTS,
   READER_TOKEN_HEADER,
   STREAK_KEY,
   USER_AGENT,
@@ -66,6 +70,14 @@ function unlock(uid: string): void {
 }
 
 const PAGE_LOCK = "onisaga.pageResolve";
+const HTML_LOCK = "onisaga.htmlFetch";
+
+/**
+ * Set while a page resolution is in progress, so the requests it makes of its
+ * own - the reader page for a token, the resolution call - are not made to
+ * queue behind the browsing pacer as well, which would deadlock them.
+ */
+let resolving = false;
 
 /**
  * How long to stand down after the site escalates to a Cloudflare challenge on
@@ -101,6 +113,7 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     const marker = parsePageMarker(request.url);
 
     if (!marker) {
+      await this.paceBrowsing(request.url);
       return request;
     }
 
@@ -128,6 +141,7 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     }
 
     await lock(PAGE_LOCK);
+    resolving = true;
     try {
       // Another resolution may have produced this exact page while we queued.
       const again = Application.getState(key) as CachedUrl | undefined;
@@ -142,6 +156,7 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
 
       return url;
     } finally {
+      resolving = false;
       unlock(PAGE_LOCK);
     }
   }
@@ -163,6 +178,31 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     }
 
     Application.setState(Date.now(), LAST_AT_KEY);
+  }
+
+  /**
+   * Spaces ordinary page fetches so a screenful of rails is not asked for all
+   * at once. Images are left alone: they are not metered, and the resolution
+   * calls have their own, stricter pacing.
+   */
+  private async paceBrowsing(url: string): Promise<void> {
+    if (resolving || isPageApi(url) || !url.startsWith(DOMAIN) || /\/_img\//.test(url)) {
+      return;
+    }
+
+    await lock(HTML_LOCK);
+    try {
+      const lastAt = (Application.getState(HTML_LAST_AT_KEY) as number | undefined) ?? 0;
+      const since = Date.now() - lastAt;
+
+      if (since >= 0 && since < HTML_GAP_MS) {
+        await Application.sleep((HTML_GAP_MS - since) / 1000);
+      }
+
+      Application.setState(Date.now(), HTML_LAST_AT_KEY);
+    } finally {
+      unlock(HTML_LOCK);
+    }
   }
 
   /** The gap in force, which rises after a refusal and eases back on success. */
@@ -214,27 +254,44 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
 
   /** Performs one page resolution, refreshing the token once on a plain 403. */
   private async mintPage(chapterId: string, index: number): Promise<string> {
-    let result = await this.requestPage(chapterId, index, await this.tokenFor(chapterId));
+    let lastStatus = 0;
 
-    if (result.status === 403 && !result.cloudflare) {
-      // A plain 403 means the token expired; a Cloudflare 403 is a lockout and
-      // must not be retried here (it is handled by the cooldown below).
-      Application.setState(undefined, tokenKey(chapterId));
-      await this.pace();
-      result = await this.requestPage(chapterId, index, await this.tokenFor(chapterId));
+    for (let attempt = 0; attempt < PAGE_RETRY_ATTEMPTS; attempt += 1) {
+      const result = await this.requestPage(chapterId, index, await this.tokenFor(chapterId));
+
+      if (result.url) {
+        return result.url;
+      }
+
+      lastStatus = result.status;
+
+      if (result.status === 403 && !result.cloudflare) {
+        // A plain 403 means the token expired with the reader page that issued
+        // it; fetch a fresh one and go again straight away.
+        Application.setState(undefined, tokenKey(chapterId));
+        await this.pace();
+        continue;
+      }
+
+      // Refused for pace: wait the shorter of what the site asked for and a
+      // cap, then try again. Giving up here is what used to leave a page
+      // permanently blank while its neighbours loaded.
+      if (result.status === 429 || result.cloudflare) {
+        const until = (Application.getState(BLOCKED_UNTIL_KEY) as number | undefined) ?? 0;
+        const wait = Math.min(Math.max(until - Date.now(), 0), MAX_RETRY_WAIT_MS);
+
+        if (attempt + 1 < PAGE_RETRY_ATTEMPTS) {
+          await Application.sleep(wait / 1000);
+          continue;
+        }
+      }
+
+      break;
     }
 
-    if (result.url) {
-      return result.url;
-    }
-
-    if (result.cloudflare) {
-      throw new Error(
-        "The site is throttling this device. Reading will resume on its own shortly.",
-      );
-    }
-
-    throw new Error(`Unable to resolve page ${index + 1} of chapter ${chapterId}`);
+    throw new Error(
+      `Unable to resolve page ${index + 1} of chapter ${chapterId} (last status ${lastStatus})`,
+    );
   }
 
   private async requestPage(

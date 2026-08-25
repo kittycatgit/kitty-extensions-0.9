@@ -107,6 +107,27 @@ export const GAP_DECAY_MS = 300;
 /** Consecutive successes before easing the gap back down. */
 export const GAP_DECAY_AFTER = 5;
 
+/**
+ * A refused page is retried rather than abandoned.
+ *
+ * A single refusal used to fail that page for good, which is why a chapter
+ * would load unevenly - most pages fine, the odd one permanently blank. The
+ * wait is capped so a retry cannot outlive the app's own request timeout.
+ */
+export const PAGE_RETRY_ATTEMPTS = 3;
+export const MAX_RETRY_WAIT_MS = 8000;
+
+/**
+ * Gap between ordinary page fetches (rails, listings, detail pages).
+ *
+ * The discover screen asks for its rails at once, and three requests in a
+ * breath is enough to earn a challenge, which is what leaves a carousel empty.
+ * They are spaced lightly - enough to look like browsing, not so much that
+ * moving around the app drags.
+ */
+export const HTML_GAP_MS = 700;
+export const HTML_LAST_AT_KEY = "onisaga.htmlAt";
+
 export const GAP_KEY = "onisaga.gap";
 export const STREAK_KEY = "onisaga.streak";
 
