@@ -35,7 +35,7 @@ import {
   MINT_WINDOW_MS,
   OBJECTING_COOLDOWN_MS,
   OBJECTING_UNTIL_KEY,
-  buildChapterResolverInject,
+  buildChapterMintInject,
   chapterCacheKey,
   pageMarkerUrl,
   readerUrl,
@@ -135,13 +135,15 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
   }
 
   /**
-   * Reports the pages without resolving any of them.
+   * Resolves every page of a chapter when it opens.
    *
-   * Each real page URL costs its own rate limited call and expires ten minutes
-   * later, so resolving a long chapter here would both trip the limiter and
-   * hand back links that die before they are read. The markers returned here
-   * are swapped for freshly signed URLs by the interceptor, one at a time, as
-   * the reader reaches each page.
+   * The chapter's own page is read with the app's client - the request the site
+   * answers most reliably, and it yields the reader token and the chapter's
+   * length together. Minting the addresses then happens inside a WebView, which
+   * the site holds to a browser's rate limit while it throttles the app client
+   * to roughly one page every two seconds. Whatever the WebView does not land
+   * is handed back as a marker for the reader's own path to resolve as it is
+   * reached, so a chapter always opens even when the WebView cannot run.
    */
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
     const mangaId = chapter.sourceManga.mangaId;
@@ -149,8 +151,7 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     this.interceptor.noteChapterOwner(chapterId, mangaId);
 
     // A chapter resolved minutes ago is served straight from state - flipping
-    // back to it, or re-opening after a mistap, costs nothing. The addresses
-    // outlive the cache window comfortably, so nothing stale is handed out.
+    // back to it, or re-opening after a mistap, costs nothing.
     const cached = Application.getState(chapterCacheKey(chapterId)) as
       | { urls: string[]; at: number }
       | undefined;
@@ -161,78 +162,85 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     }
 
     if (cached) {
-      // Expired - clear it now rather than leave a dead blob in state.
       Application.setState(undefined, chapterCacheKey(chapterId));
     }
 
-    // Resolution runs through the single-flight, so two chapter opens in quick
-    // succession never put two pools on the site at once - which would double
-    // the mint rate straight into a refusal.
+    const url = readerUrl(mangaId, chapterId);
+    const [, buffer] = await Application.scheduleRequest({ url, method: "GET" });
+    const html = Application.arrayBufferToUTF8String(buffer);
 
-    let outcome: WebViewChapterOutcome | null | "cached";
+    // Readiness first: a chapter the site has not finished preparing answers
+    // with a waiting screen rather than a reader, and saying so is far more use
+    // than complaining that its length cannot be read.
+    const token = html.match(/readerToken['"]?\s*:\s*['"]([^'"]{8,})['"]/)?.[1];
+    const preparing = /loading pages|hang tight|being processed|preparing/i.test(html);
 
-    try {
-      outcome = await runExclusive<WebViewChapterOutcome | null | "cached">(() => {
-        const ready = Application.getState(chapterCacheKey(chapterId)) as
-          | { urls: string[]; at: number }
-          | undefined;
-
-        if (ready && Date.now() - ready.at < CHAPTER_CACHE_TTL_MS) {
-          return Promise.resolve("cached" as const);
-        }
-
-        // The whole open happens inside a WebView - reader page, page count,
-        // and every page address - because the site holds a WebView to the
-        // browser's generous limit while the app's own client is throttled to
-        // a crawl. The throttled client is only consulted if this cannot run.
-        return this.resolveViaWebView(mangaId, chapterId);
-      });
-    } finally {
-    }
-
-    if (outcome === "cached") {
-      const ready = Application.getState(chapterCacheKey(chapterId)) as {
-        urls: string[];
-        at: number;
-      };
-      console.log(
-        `[OniSaga] chapter ${chapterId} arrived just-prefetched (${ready.urls.length} pages)`,
-      );
-      return { id: chapterId, mangaId, pages: ready.urls };
-    }
-
-    if (outcome?.preparing || outcome?.importing) {
+    if (!token || preparing) {
       throw new Error(
-        `The site is still ${outcome.importing ? "importing" : "preparing"} chapter ${chapterId}. Give it a minute and open it again.`,
+        `The site is still preparing chapter ${chapterId}. Give it a minute and open it again.`,
       );
     }
 
-    if (outcome?.nopages) {
+    const declared = Number(
+      html.match(/['"]?(?:pageCount|totalPages|pages_count)['"]?\s*:\s*(\d+)/)?.[1] ??
+        html.match(/(\d+)\s*pages\b/i)?.[1] ??
+        html.match(/data-pages=['"](\d+)['"]/)?.[1] ??
+        chapter.additionalInfo?.pages ??
+        0,
+    );
+
+    let total = Number.isFinite(declared) && declared > 0 ? declared : 0;
+
+    if (total <= 0) {
+      const info = await this.interceptor.chapterInfo(chapterId, token);
+
+      if (info?.importing) {
+        throw new Error(
+          `The site is still importing chapter ${chapterId}. Give it a minute and open it again.`,
+        );
+      }
+
+      total = info?.total ?? 0;
+    }
+
+    if (total <= 0) {
       throw new Error(
         `Chapter ${chapterId} reports no pages. It may have been removed, or the site may still be working on it.`,
       );
     }
 
-    if (outcome?.urls && outcome.total && outcome.total > 0) {
-      const total = outcome.total;
+    // Hand the token over so the reader's own path does not fetch this page
+    // again for one, and count this request against the pacing clock.
+    this.interceptor.noteToken(chapterId, token);
+    this.interceptor.noteMeteredRequest();
+
+    const outcome = await runExclusive(() => this.mintViaWebView(url, chapterId, token, total));
+
+    const pages: string[] = [];
+    let complete = false;
+
+    if (outcome) {
       const odd = Object.keys(outcome.odd ?? {}).length
         ? `, odd=${JSON.stringify(outcome.odd)}`
         : "";
       console.log(
-        `[OniSaga] webview resolved ${outcome.got}/${Math.min(total, WEBVIEW_PAGE_CAP)} of ${total} pages in ${outcome.ms}ms, r429=${outcome.r429}, r403=${outcome.r403}, refreshes=${outcome.refreshes}, concurrency settled at ${outcome.conc}${odd}`,
+        `[OniSaga] webview minted ${outcome.got}/${total} pages in ${outcome.ms}ms, r429=${outcome.r429}, r403=${outcome.r403}, refreshes=${outcome.refreshes}, concurrency ${outcome.conc}${odd}`,
       );
 
-      // The token the pool ended on is still fresh - hand it to the lazy path
-      // so any page the pool did not land resolves without minting its own.
+      this.recordMints(outcome.got ?? 0);
+
       if (outcome.token) {
         this.interceptor.noteToken(chapterId, outcome.token);
       }
 
-      const pages: string[] = [];
-      let complete = true;
+      if ((outcome.r429 ?? 0) > 0) {
+        Application.setState(Date.now() + OBJECTING_COOLDOWN_MS, OBJECTING_UNTIL_KEY);
+      }
+
+      complete = true;
 
       for (let index = 0; index < total; index += 1) {
-        const resolved = outcome.urls[index];
+        const resolved = outcome.urls?.[index];
 
         if (!resolved) {
           complete = false;
@@ -240,30 +248,79 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
 
         pages.push(resolved ?? pageMarkerUrl(chapterId, index));
       }
-
-      // Every mint counts against the site's short-window budget - record it
-      // so the prefetcher can see how close the ceiling is, and note when the
-      // site actually objected, which the next open's budget reads.
-      this.recordMints(outcome.got ?? 0);
-      if ((outcome.r429 ?? 0) > 0) {
-        Application.setState(Date.now() + OBJECTING_COOLDOWN_MS, OBJECTING_UNTIL_KEY);
+    } else {
+      for (let index = 0; index < total; index += 1) {
+        pages.push(pageMarkerUrl(chapterId, index));
       }
-
-      // Only a fully resolved chapter is worth keeping: a partial one should
-      // try again next open rather than pin its markers for the cache window.
-      // The stamp is when resolution STARTED, since that is when the addresses
-      // were minted and their ten-minute signatures began to tick.
-      if (complete) {
-        this.cacheChapter(chapterId, pages, Date.now() - outcome.ms);
-      }
-
-      return { id: chapterId, mangaId, pages };
     }
 
-    // A Cloudflare page, or no WebView at all: the app-client path still knows
-    // the way, and a challenge surfaces the app's own bypass rather than a
-    // guess about what went wrong.
-    return this.chapterDetailsViaApp(chapter, mangaId);
+    if (complete) {
+      // Stamped from when minting began, since that is when the addresses'
+      // ten-minute signatures started to tick.
+      this.cacheChapter(chapterId, pages, Date.now() - (outcome?.ms ?? 0));
+    }
+
+    return { id: chapterId, mangaId, pages };
+  }
+
+  /**
+   * Mints a chapter's addresses inside a WebView. Returns null when the WebView
+   * cannot do it - and says in the log exactly why, since a chapter quietly
+   * falling back to the slow path is the difference between a few seconds and
+   * a few minutes, and guessing at the reason afterwards helps nobody.
+   */
+  private async mintViaWebView(
+    url: string,
+    chapterId: string,
+    token: string,
+    total: number,
+  ): Promise<WebViewChapterOutcome | null> {
+    const burstBudget = Math.max(0, MINT_CEILING - this.recentMints());
+
+    try {
+      const outcome = await Application.executeInWebView({
+        source: {
+          html: "<html><head></head><body></body></html>",
+          baseUrl: url,
+          loadCSS: false,
+          loadImages: false,
+          userAgent: USER_AGENT,
+        },
+        inject: buildChapterMintInject(
+          chapterId,
+          url,
+          token,
+          total,
+          WEBVIEW_PAGE_CAP,
+          WEBVIEW_START_CONCURRENCY,
+          WEBVIEW_MAX_CONCURRENCY,
+          WEBVIEW_BUDGET_MS,
+          burstBudget,
+        ),
+        storage: { cookies: this.cookieStorage.cookiesForUrl(url) },
+      });
+
+      for (const cookie of outcome.storage.cookies) {
+        if (!cookie.expires || cookie.expires.getTime() > Date.now()) {
+          this.cookieStorage.setCookie(cookie);
+        }
+      }
+
+      const parsed = JSON.parse(String(outcome.result)) as WebViewChapterOutcome;
+
+      if (parsed.cf) {
+        console.log(
+          `[OniSaga] webview met bot verification while minting chapter ${chapterId}; falling back to the slow path`,
+        );
+      }
+
+      return parsed;
+    } catch (error) {
+      console.log(
+        `[OniSaga] webview could not mint chapter ${chapterId} (${String(error)}); falling back to the slow path`,
+      );
+      return null;
+    }
   }
 
   /** How many page addresses have been minted in the recent window, pruned as
@@ -312,128 +369,6 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     }
 
     Application.setState(index, CHAPTER_CACHE_INDEX_KEY);
-  }
-
-  /**
-   * The chapter open done entirely with the app's own HTTP client - the road
-   * taken when the WebView is unavailable or came back challenged. Slower by
-   * nature (the client is what the site throttles), so every page is handed
-   * out as a lazy marker for the interceptor to resolve one at a time.
-   */
-  private async chapterDetailsViaApp(chapter: Chapter, mangaId: string): Promise<ChapterDetails> {
-    const url = readerUrl(mangaId, chapter.chapterId);
-    const [, buffer] = await Application.scheduleRequest({ url, method: "GET" });
-    const html = Application.arrayBufferToUTF8String(buffer);
-
-    // Readiness first: a chapter the site has not finished preparing answers
-    // with a waiting screen rather than a reader, and saying so is far more
-    // use than complaining that its length cannot be read.
-    const token = html.match(/readerToken['"]?\s*:\s*['"]([^'"]{8,})['"]/)?.[1];
-    const preparing = /loading pages|hang tight|being processed|preparing/i.test(html);
-
-    if (!token || preparing) {
-      throw new Error(
-        `The site is still preparing chapter ${chapter.chapterId}. Give it a minute and open it again.`,
-      );
-    }
-
-    const declared = Number(
-      html.match(/['"]?(?:pageCount|totalPages|pages_count)['"]?\s*:\s*(\d+)/)?.[1] ??
-        html.match(/(\d+)\s*pages\b/i)?.[1] ??
-        html.match(/data-pages=['"](\d+)['"]/)?.[1] ??
-        chapter.additionalInfo?.pages ??
-        0,
-    );
-
-    let total = Number.isFinite(declared) && declared > 0 ? declared : 0;
-
-    if (total <= 0) {
-      // The reader page did not say, so ask the site directly. It also reports
-      // whether the chapter is still being imported, which is the honest
-      // reason an otherwise fine chapter has no pages to show yet.
-      const info = await this.interceptor.chapterInfo(chapter.chapterId, token);
-
-      if (info?.importing) {
-        throw new Error(
-          `The site is still importing chapter ${chapter.chapterId}. Give it a minute and open it again.`,
-        );
-      }
-
-      total = info?.total ?? 0;
-    }
-
-    if (total <= 0) {
-      throw new Error(
-        `Chapter ${chapter.chapterId} reports no pages. It may have been removed, or the site may still be working on it.`,
-      );
-    }
-
-    // Hand over the token from the page just fetched, so resolving the first
-    // page does not fetch the very same page again, and count this request so
-    // the first resolution waits its turn rather than arriving on its heels.
-    this.interceptor.noteToken(chapter.chapterId, token);
-    this.interceptor.noteMeteredRequest();
-
-    console.log(`[OniSaga] webview unavailable; ${total} pages will resolve lazily`);
-
-    const pages: string[] = [];
-    for (let index = 0; index < total; index += 1) {
-      pages.push(pageMarkerUrl(chapter.chapterId, index));
-    }
-
-    return { id: chapter.chapterId, mangaId, pages };
-  }
-
-  /**
-   * Runs the whole chapter open inside a WebView, which the site treats as the
-   * browser it is - the fast rate limit - rather than like the app's client.
-   * Returns the inject's summary, or null if the WebView is unavailable or
-   * errors, so the caller can fall back to the app-client path.
-   */
-  private async resolveViaWebView(
-    mangaId: string,
-    chapterId: string,
-  ): Promise<WebViewChapterOutcome | null> {
-    const url = readerUrl(mangaId, chapterId);
-
-    // How much the site's window can still take at full speed. When a heavy
-    // read has spent it, the pool paces itself down rather than trip a refusal.
-    const burstBudget = Math.max(0, MINT_CEILING - this.recentMints());
-
-    try {
-      const outcome = await Application.executeInWebView({
-        source: {
-          html: "<html><head></head><body></body></html>",
-          baseUrl: url,
-          loadCSS: false,
-          loadImages: false,
-          userAgent: USER_AGENT,
-        },
-        inject: buildChapterResolverInject(
-          chapterId,
-          url,
-          WEBVIEW_PAGE_CAP,
-          WEBVIEW_START_CONCURRENCY,
-          WEBVIEW_MAX_CONCURRENCY,
-          WEBVIEW_BUDGET_MS,
-          burstBudget,
-        ),
-        storage: { cookies: this.cookieStorage.cookiesForUrl(url) },
-      });
-
-      // Keep any fresh clearance the WebView earned along the way.
-      for (const cookie of outcome.storage.cookies) {
-        if (!cookie.expires || cookie.expires.getTime() > Date.now()) {
-          this.cookieStorage.setCookie(cookie);
-        }
-      }
-
-      return JSON.parse(String(outcome.result)) as WebViewChapterOutcome;
-    } catch {
-      // Older app builds answer executeInWebView with "Not Implemented", and
-      // any WebView failure should simply hand back to the app-client path.
-      return null;
-    }
   }
 
   async getSearchResults(
