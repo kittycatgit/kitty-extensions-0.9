@@ -6,6 +6,20 @@ import type { SortingOption } from "@paperback/types";
 export const DOMAIN = "https://onisaga.com";
 
 /**
+ * The user agent every request presents.
+ *
+ * The app's own default omits the `Version/` and `Safari/` tokens a real
+ * Safari always sends, which is the signature rate limiters use to tell a
+ * native client from a browser - and the device is throttled far harder than a
+ * browser doing the very same thing. This is a complete, ordinary Safari
+ * string so the site treats the extension the way it treats the site's own
+ * reader.
+ */
+export const USER_AGENT =
+  "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 " +
+  "(KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1";
+
+/**
  * Stand-in for a card the site renders without artwork.
  *
  * An empty string is rejected as an invalid URL and, because covers are

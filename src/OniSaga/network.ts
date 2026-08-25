@@ -21,6 +21,7 @@ import {
   PAGE_REQUEST_GAP_MS,
   READER_TOKEN_HEADER,
   STREAK_KEY,
+  USER_AGENT,
   pageApiUrl,
   parsePageMarker,
   readerUrl,
@@ -92,7 +93,7 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
   override async interceptRequest(request: Request): Promise<Request> {
     request.headers = {
       ...request.headers,
-      "user-agent": await Application.getDefaultUserAgent(),
+      "user-agent": USER_AGENT,
       referer: `${DOMAIN}/`,
       "accept-language": "en-US,en;q=0.9",
     };
@@ -182,10 +183,14 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
    * it the extension backs off a step each time it is refused and settles at
    * whatever pace the site actually tolerates.
    */
-  private widenGap(): void {
-    const next = Math.min(this.currentGap() + GAP_INCREASE_MS, MAX_PAGE_GAP_MS);
+  private widenGap(reason: string): void {
+    const from = this.currentGap();
+    const next = Math.min(from + GAP_INCREASE_MS, MAX_PAGE_GAP_MS);
     Application.setState(next, GAP_KEY);
     Application.setState(0, STREAK_KEY);
+    // Printed so a device log shows where the pace actually settles: the rate
+    // that applies to a device cannot be measured from anywhere else.
+    console.log(`[OniSaga] ${reason}: gap ${from}ms -> ${next}ms`);
   }
 
   /** Eases the gap back down once a run of requests has gone through cleanly. */
@@ -198,8 +203,13 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     }
 
     Application.setState(0, STREAK_KEY);
-    const eased = Math.max(this.currentGap() - GAP_DECAY_MS, MIN_PAGE_GAP_MS);
-    Application.setState(eased, GAP_KEY);
+    const from = this.currentGap();
+    const eased = Math.max(from - GAP_DECAY_MS, MIN_PAGE_GAP_MS);
+
+    if (eased !== from) {
+      Application.setState(eased, GAP_KEY);
+      console.log(`[OniSaga] clean run: gap ${from}ms -> ${eased}ms`);
+    }
   }
 
   /** Performs one page resolution, refreshing the token once on a plain 403. */
@@ -235,19 +245,24 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     const [response, buffer] = await Application.scheduleRequest({
       url: pageApiUrl(chapterId, index),
       method: "GET",
-      headers: { accept: "application/json", [READER_TOKEN_HEADER]: token, referer: `${DOMAIN}/` },
+      headers: {
+        accept: "application/json",
+        [READER_TOKEN_HEADER]: token,
+        referer: `${DOMAIN}/`,
+        "user-agent": USER_AGENT,
+      },
     });
 
     // The rate limit escalates to a Cloudflare challenge on the API itself.
     // Treat it as a hard back-off rather than a challenge the reader can solve.
     if (response.headers?.["cf-mitigated"] === "challenge") {
-      this.widenGap();
+      this.widenGap("cloudflare");
       this.block(CF_COOLDOWN_MS);
       return { status: response.status, cloudflare: true };
     }
 
     if (response.status === 429) {
-      this.widenGap();
+      this.widenGap("rate limited");
       this.block(this.retryAfterMs(response));
       return { status: 429 };
     }
@@ -317,7 +332,7 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
         {
           url: DOMAIN,
           method: "GET",
-          headers: { referer: `${DOMAIN}/`, "user-agent": await Application.getDefaultUserAgent() },
+          headers: { referer: `${DOMAIN}/`, "user-agent": USER_AGENT },
         },
         "Bot verification detected, bypass it to continue!",
       );
@@ -339,7 +354,11 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
 
 /** Pulls the reader token out of a reader page. */
 async function readTokenFrom(url: string): Promise<string> {
-  const [, buffer] = await Application.scheduleRequest({ url, method: "GET" });
+  const [, buffer] = await Application.scheduleRequest({
+    url,
+    method: "GET",
+    headers: { "user-agent": USER_AGENT, referer: `${DOMAIN}/` },
+  });
   const html = Application.arrayBufferToUTF8String(buffer);
   const token = html.match(/readerToken['"]?\s*:\s*['"]([^'"]{8,})['"]/)?.[1];
 
