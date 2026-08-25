@@ -83,52 +83,59 @@ export function readerUrl(mangaId: string, chapterId: string): string {
 export const READER_TOKEN_HEADER = "X-Reader-Token";
 
 /**
- * Tuning for the WebView page resolver.
+ * Tuning for the WebView chapter resolver.
  *
  * The site rate-limits the app's own HTTP client far more harshly than a real
  * browser: from the app, page calls closer than ~1.7s apart earn a 429; from a
- * browser the same calls at 250ms sail through, which points at the network
- * fingerprint, not the headers. A WebView *is* a browser - WebKit, the engine
- * Safari runs on - so resolving pages inside one lets them go at browser pace.
- * This resolves a front batch up front so the reader opens with pages already
- * in hand; the rest stay lazy markers the interceptor resolves as it reaches
- * them. Kept modest so the reader still opens quickly if the batch is slow.
+ * browser the same calls sail through, which points at the network fingerprint,
+ * not the headers. A WebView *is* a browser - WebKit, the engine Safari runs
+ * on - so the whole chapter open happens inside one: the reader page, the page
+ * count, and every page address, at browser pace. Concurrency starts at the
+ * level a phone has been seen to hold without dropping and probes one step
+ * higher, easing off on its own if the connection objects.
  */
 export const WEBVIEW_PAGE_CAP = 140;
-export const WEBVIEW_START_CONCURRENCY = 2;
-export const WEBVIEW_MAX_CONCURRENCY = 4;
-// Long chapters resolve at ~5 pages/s at the concurrency the phone holds without
-// dropping (4), so a 114-page chapter needs ~24s. The old 18s budget cut those
-// off and let the tail crawl in on the lazy path; ~26s covers a 114-page chapter
-// with margin. If the budget is reached the finished region is still contiguous
-// (requeues go to the front), so the reader gets a clean tail, never a hole.
+export const WEBVIEW_START_CONCURRENCY = 4;
+export const WEBVIEW_MAX_CONCURRENCY = 5;
 export const WEBVIEW_BUDGET_MS = 26_000;
 
+/** A resolved chapter is kept briefly so re-opening it costs nothing. The
+ * signed addresses live ~10 minutes from MINTING - the cache stamps entries
+ * with when resolution started, and this window leaves a cache hit at the very
+ * edge still holding several minutes of signature life for the read. */
+export const CHAPTER_CACHE_TTL_MS = 4 * 60_000;
+
+/** How many resolved chapters are kept at once. Each entry is a page-URL list
+ * a few tens of KB large, so the cache trims itself to the newest few rather
+ * than accreting an entry for every chapter ever opened. */
+export const CHAPTER_CACHE_MAX_ENTRIES = 8;
+
+export const CHAPTER_CACHE_INDEX_KEY = "onisaga.chapter.index";
+
+export function chapterCacheKey(chapterId: string): string {
+  return `onisaga.chapter.${chapterId}`;
+}
+
 /**
- * Builds the script the WebView runs: an adaptive worker pool that resolves the
- * chapter's page addresses through the same API the site's own reader calls.
+ * Builds the script the WebView runs: the entire chapter open, in the browser.
  *
- * The WebView is not held to the app client's harsh limit, so it need not crawl
- * one page at a time - it runs a few fetches at once. It starts cautious, widens
- * the concurrency while every reply is clean, and on a 429 drops straight back
- * to one at a time and waits out the stated penalty.
- *
- * The reader token is the catch: it expires after ~35 mints (the API answers
- * `403 Invalid or expired reader token`), which is why a long chapter used to
- * load fast then crawl once the first token ran dry. So a 403 mints a fresh
- * token - one refresh shared across the workers - from the reader page and the
- * refused page is retried. Refused, expired-out, or dropped pages are requeued a
- * few times; a 429 penalty long enough to be a real cooldown abandons the rest
- * to the lazy path that is built to sit those out. It returns a Promise -
- * Paperback awaits it - with a JSON summary (ordered URLs, how many landed, the
- * refusals and token refreshes, the concurrency it settled on) the caller parses
- * and logs.
+ * It fetches the reader page itself (so the throttled app client makes no call
+ * at all), reads the token and the page count from it - falling back to the
+ * pages API, which also owns the honest "still importing" answer - and then
+ * resolves every page address with an adaptive worker pool. The token rides the
+ * x-reader-token-next header each reply carries, so it never runs dry
+ * mid-chapter; re-fetching the reader page remains only as a fallback, capped
+ * so it cannot spin. Refused or dropped pages retry at the FRONT of the queue,
+ * keeping the finished region contiguous, and repeated connection drops ease
+ * the concurrency back down a step. It returns a Promise - Paperback awaits
+ * it - resolving with a JSON summary: the ordered URLs, the total, the token it
+ * ended on, and the counters the caller logs. Early outcomes (a Cloudflare
+ * page, a chapter still being prepared or imported) come back as flags so the
+ * caller can say the right thing instead of guessing.
  */
-export function buildPageResolverInject(
+export function buildChapterResolverInject(
   chapterId: string,
-  token: string,
   readerUrl: string,
-  total: number,
   cap: number,
   startConcurrency: number,
   maxConcurrency: number,
@@ -138,126 +145,178 @@ export function buildPageResolverInject(
 return new Promise(function (resolve) {
   var CID = ${JSON.stringify(chapterId)};
   var READER = ${JSON.stringify(readerUrl)};
-  var LIMIT = Math.min(${total}, ${cap});
+  var CAP = ${cap};
   var MAX_C = ${maxConcurrency};
   var BUDGET = ${budgetMs};
   var HEADER = ${JSON.stringify(READER_TOKEN_HEADER)};
   var LONG_PENALTY = 10000;
   var MAX_ATTEMPTS = 6;
-  var MAX_REFRESHES = Math.ceil(LIMIT / 25) + 3;
-  var token = ${JSON.stringify(token)};
-  var refreshing = null;
-  var results = new Array(LIMIT).fill(null);
-  var queue = [];
-  for (var k = 0; k < LIMIT; k += 1) { queue.push(k); }
-  var conc = ${startConcurrency};
-  var got = 0;
-  var r429 = 0;
-  var r403 = 0;
-  var refreshes = 0;
-  var running = 0;
-  var cleanStreak = 0;
-  var attempts = {};
-  var pauseUntil = 0;
   var started = Date.now();
-  var finished = false;
-  var resumePending = false;
 
-  function finish() {
-    if (finished) { return; }
-    finished = true;
-    resolve(JSON.stringify({ urls: results, got: got, r429: r429, r403: r403, refreshes: refreshes, conc: conc, ms: Date.now() - started }));
+  function answer(extra) {
+    extra.ms = Date.now() - started;
+    resolve(JSON.stringify(extra));
   }
 
-  function requeue(idx) {
-    attempts[idx] = (attempts[idx] || 0) + 1;
-    // Retry at the FRONT, not the back. A page refused for an expired token or
-    // dropped under load should resolve right away - as soon as the token is
-    // refreshed - so the finished region stays contiguous. Sent to the back it
-    // would land behind the whole chapter and, if the budget runs out first,
-    // become a hole in the middle while the pages after it loaded fine.
-    if (attempts[idx] <= MAX_ATTEMPTS) { queue.unshift(idx); }
-  }
+  var readerOk = false;
 
-  function refreshToken() {
-    if (refreshing) { return refreshing; }
-    // If refreshing has stopped helping (a challenge, or a cap the token cannot
-    // dodge), give up rather than burn the whole budget re-fetching the reader.
-    if (refreshes >= MAX_REFRESHES) { return Promise.resolve(); }
-    refreshes += 1;
-    refreshing = fetch(READER, { headers: { accept: "text/html" }, cache: "no-store" })
-      .then(function (r) { return r.text(); })
-      .then(function (html) {
-        var m = html.match(/readerToken['"]?\\s*:\\s*['"]([^'"]{8,})['"]/);
-        if (m) { token = m[1]; }
-        refreshing = null;
-      })
-      .catch(function () { refreshing = null; });
-    return refreshing;
-  }
+  fetch(READER, { headers: { accept: "text/html" }, cache: "no-store" })
+    .then(function (r) { readerOk = r.status === 200; return r.text(); })
+    .then(function (html) {
+      if (/just a moment|cf-browser-verification|challenge-platform/i.test(html)) {
+        answer({ cf: true });
+        return;
+      }
+      // An error page is not a chapter being prepared - hand it back so the
+      // app-client path can retry it and surface a challenge the proper way.
+      if (!readerOk) { answer({ failed: true }); return; }
+      var token = (html.match(/readerToken['"]?\\s*:\\s*['"]([^'"]{8,})['"]/) || [])[1];
+      var preparing = /loading pages|hang tight|being processed|preparing/i.test(html);
+      if (!token || preparing) { answer({ preparing: true }); return; }
+      var m = html.match(/['"]?(?:pageCount|totalPages|pages_count)['"]?\\s*:\\s*(\\d+)/) ||
+        html.match(/(\\d+)\\s*pages\\b/i) ||
+        html.match(/data-pages=['"](\\d+)['"]/);
+      var total = m ? parseInt(m[1], 10) : 0;
+      if (total > 0) { pool(token, total); return; }
+      var headers = { accept: "application/json" };
+      headers[HEADER] = token;
+      fetch("/api/chapter/" + CID + "/pages", { headers: headers })
+        .then(function (r) { return r.status === 200 ? r.json() : "ERR"; })
+        .then(function (j) {
+          // Only an honest 200 gets to say the chapter is empty - a refusal or
+          // a drop here is a transient, not a removal, so route it to the
+          // fallback rather than a permanent-sounding verdict.
+          if (j === "ERR") { answer({ failed: true }); return; }
+          if (j && j.importing) { answer({ importing: true }); return; }
+          var t = j ? parseInt(j.total_pages, 10) || 0 : 0;
+          if (t > 0) { pool(token, t); } else { answer({ nopages: true }); }
+        })
+        .catch(function () { answer({ failed: true }); });
+    })
+    .catch(function () { answer({ failed: true }); });
 
-  function tick() {
-    if (finished) { return; }
-    if (Date.now() - started > BUDGET) { finish(); return; }
-    if (queue.length === 0 && running === 0) { finish(); return; }
-    var paused = Date.now() < pauseUntil;
-    while (!paused && running < conc && queue.length > 0) {
-      run(queue.shift());
+  function pool(token, total) {
+    // The budget meters page resolution alone - the reader-page discovery that
+    // ran before this point must not eat into a long chapter's tail.
+    var poolStarted = Date.now();
+    var LIMIT = Math.min(total, CAP);
+    var MAX_REFRESHES = Math.ceil(LIMIT / 25) + 3;
+    var refreshing = null;
+    var results = new Array(LIMIT).fill(null);
+    var queue = [];
+    for (var k = 0; k < LIMIT; k += 1) { queue.push(k); }
+    var conc = ${startConcurrency};
+    var got = 0;
+    var r429 = 0;
+    var r403 = 0;
+    var refreshes = 0;
+    var running = 0;
+    var cleanStreak = 0;
+    var dropStreak = 0;
+    var attempts = {};
+    var pauseUntil = 0;
+    var finished = false;
+    var resumePending = false;
+
+    function finish() {
+      if (finished) { return; }
+      finished = true;
+      answer({ urls: results, total: total, token: token, got: got, r429: r429, r403: r403, refreshes: refreshes, conc: conc });
     }
-    if (paused && running === 0 && !resumePending) {
-      resumePending = true;
-      setTimeout(function () { resumePending = false; tick(); }, Math.min(Math.max(pauseUntil - Date.now() + 20, 20), 2000));
+
+    function requeue(idx) {
+      attempts[idx] = (attempts[idx] || 0) + 1;
+      // Retry at the FRONT, not the back. A page refused for an expired token
+      // or dropped under load should resolve right away - as soon as the token
+      // is refreshed - so the finished region stays contiguous. Sent to the
+      // back it would land behind the whole chapter and, if the budget runs out
+      // first, become a hole in the middle while later pages loaded fine.
+      if (attempts[idx] <= MAX_ATTEMPTS) { queue.unshift(idx); }
     }
-  }
 
-  function run(idx) {
-    running += 1;
-    // Remember which token this request used, so a burst of 403s from workers
-    // that all shared one dead token triggers a single refresh, not one each.
-    var sent = token;
-    var headers = { accept: "application/json" };
-    headers[HEADER] = sent;
-    fetch("/api/chapter/" + CID + "/page/" + idx, { headers: headers })
-      .then(function (r) {
-        if (r.status === 429 || r.headers.get("cf-mitigated")) {
-          r429 += 1;
-          cleanStreak = 0;
-          conc = 1;
-          var ra = parseInt(r.headers.get("retry-after") || "0", 10) * 1000;
-          if (ra > LONG_PENALTY) { queue.length = 0; return null; }
-          pauseUntil = Date.now() + (ra > 0 ? ra : 1200);
-          requeue(idx);
-          return null;
-        }
-        if (r.status === 403) {
-          // The reader token has expired - mint a fresh one and try again, but
-          // only if nobody has already replaced the token this request used.
-          r403 += 1;
-          requeue(idx);
-          if (token === sent) { return refreshToken(); }
-          return null;
-        }
-        if (r.status !== 200) { return null; }
-        // The token rolls forward: each reply carries the next one to use. Ride
-        // it so the token never runs dry mid-chapter, which is what avoids the
-        // 403s and the costly reader-page refetches on a long read.
-        var next = r.headers.get("x-reader-token-next");
-        if (next) { token = next; }
-        return r.json().then(function (j) {
-          if (j && j.url) { results[idx] = j.url; got += 1; }
-          cleanStreak += 1;
-          if (cleanStreak % 6 === 0 && conc < MAX_C && Date.now() >= pauseUntil) { conc += 1; }
-        });
-      })
-      .catch(function () {
-        // A dropped connection under load is not a refusal - retry it a few
-        // times rather than surrender the page to the slow lazy path.
-        requeue(idx);
-      })
-      .then(function () { running -= 1; tick(); });
-  }
+    function refreshToken() {
+      if (refreshing) { return refreshing; }
+      // If refreshing has stopped helping (a challenge, or a cap the token
+      // cannot dodge), give up rather than burn the budget re-fetching.
+      if (refreshes >= MAX_REFRESHES) { return Promise.resolve(); }
+      refreshes += 1;
+      refreshing = fetch(READER, { headers: { accept: "text/html" }, cache: "no-store" })
+        .then(function (r) { return r.text(); })
+        .then(function (html) {
+          var m = html.match(/readerToken['"]?\\s*:\\s*['"]([^'"]{8,})['"]/);
+          if (m) { token = m[1]; }
+          refreshing = null;
+        })
+        .catch(function () { refreshing = null; });
+      return refreshing;
+    }
 
-  tick();
+    function tick() {
+      if (finished) { return; }
+      if (Date.now() - poolStarted > BUDGET) { finish(); return; }
+      if (queue.length === 0 && running === 0) { finish(); return; }
+      var paused = Date.now() < pauseUntil;
+      while (!paused && running < conc && queue.length > 0) {
+        run(queue.shift());
+      }
+      if (paused && running === 0 && !resumePending) {
+        resumePending = true;
+        setTimeout(function () { resumePending = false; tick(); }, Math.min(Math.max(pauseUntil - Date.now() + 20, 20), 2000));
+      }
+    }
+
+    function run(idx) {
+      running += 1;
+      // Remember which token this request used, so a burst of 403s from
+      // workers that all shared one dead token triggers a single refresh.
+      var sent = token;
+      var headers = { accept: "application/json" };
+      headers[HEADER] = sent;
+      fetch("/api/chapter/" + CID + "/page/" + idx, { headers: headers })
+        .then(function (r) {
+          if (r.status === 429 || r.headers.get("cf-mitigated")) {
+            r429 += 1;
+            cleanStreak = 0;
+            conc = 1;
+            var ra = parseInt(r.headers.get("retry-after") || "0", 10) * 1000;
+            if (ra > LONG_PENALTY) { queue.length = 0; return null; }
+            pauseUntil = Date.now() + (ra > 0 ? ra : 1200);
+            requeue(idx);
+            return null;
+          }
+          if (r.status === 403) {
+            // The reader token has expired - mint a fresh one and try again,
+            // unless somebody already replaced the token this request used.
+            r403 += 1;
+            requeue(idx);
+            if (token === sent) { return refreshToken(); }
+            return null;
+          }
+          if (r.status !== 200) { return null; }
+          dropStreak = 0;
+          // The token rolls forward: each reply carries the next one to use.
+          // Ride it so the token never runs dry mid-chapter, which is what
+          // avoids the 403s and the costly reader-page refetches.
+          var next = r.headers.get("x-reader-token-next");
+          if (next) { token = next; }
+          return r.json().then(function (j) {
+            if (j && j.url) { results[idx] = j.url; got += 1; }
+            cleanStreak += 1;
+            if (cleanStreak % 6 === 0 && conc < MAX_C && Date.now() >= pauseUntil) { conc += 1; }
+          });
+        })
+        .catch(function () {
+          // A dropped connection under load is not a refusal - retry it, and
+          // if drops keep coming, ease the concurrency back down a step.
+          dropStreak += 1;
+          if (dropStreak >= 3) { conc = Math.max(1, conc - 1); dropStreak = 0; }
+          requeue(idx);
+        })
+        .then(function () { running -= 1; tick(); });
+    }
+
+    tick();
+  }
 });
 `;
 }
