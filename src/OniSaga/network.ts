@@ -20,10 +20,10 @@ import {
   KNOWN_BAD_MARGIN_MS,
   LAST_REFUSAL_KEY,
   MAX_PAGE_GAP_MS,
-  COOLDOWN_WAIT_CAP_MS,
+  COOLDOWN_MAX_STEPS,
+  COOLDOWN_STEP_MS,
   MIN_PAGE_GAP_MS,
   PAGE_REQUEST_GAP_MS,
-  PAGE_RETRY_ATTEMPTS,
   READER_TOKEN_HEADER,
   REFUSAL_EPISODE_MS,
   STREAK_KEY,
@@ -197,30 +197,57 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
       return cached.url;
     }
 
-    // Cooldown is checked before the lock, so a page caught in a long penalty
-    // fails at once instead of holding every other page behind it.
-    this.awaitShortCooldownOrFail(index);
+    // A refused page keeps trying until it loads - a blank page in the middle
+    // stops the reader. The waiting is done without the lock, so a page serving
+    // its penalty never blocks pages the reader has already loaded, nor the
+    // resolution of others.
+    for (let step = 0; step < COOLDOWN_MAX_STEPS; step += 1) {
+      await this.waitOutCooldown();
 
-    await lock(PAGE_LOCK);
-    resolving = true;
-    try {
-      // Another resolution may have produced this exact page while we queued.
-      const again = Application.getState(key) as CachedUrl | undefined;
-      if (again && Date.now() - again.at < SIGNED_URL_TTL_MS) {
-        return again.url;
+      await lock(PAGE_LOCK);
+      resolving = true;
+      let refused = false;
+      try {
+        const again = Application.getState(key) as CachedUrl | undefined;
+        if (again && Date.now() - again.at < SIGNED_URL_TTL_MS) {
+          return again.url;
+        }
+
+        // Skip the paced call if it tripped while we queued; go wait it out.
+        if (this.cooldownRemaining() > 0) {
+          refused = true;
+        } else {
+          await this.pace();
+          const result = await this.mintPage(chapterId, index);
+
+          if (result.url) {
+            Application.setState({ url: result.url, at: Date.now() } satisfies CachedUrl, key);
+            return result.url;
+          }
+
+          // A refusal set a cooldown; loop to wait it out, off the lock.
+          refused = result.refused;
+        }
+      } finally {
+        resolving = false;
+        unlock(PAGE_LOCK);
       }
 
-      // It may have tripped while we queued for the lock.
-      this.failIfCoolingDown(index);
-      await this.pace();
+      if (!refused) {
+        break;
+      }
+    }
 
-      const url = await this.mintPage(chapterId, index);
-      Application.setState({ url, at: Date.now() } satisfies CachedUrl, key);
+    throw new Error(
+      `Page ${index + 1} could not be loaded after waiting out the site's rate limit.`,
+    );
+  }
 
-      return url;
-    } finally {
-      resolving = false;
-      unlock(PAGE_LOCK);
+  /** Waits out an active penalty, one bounded step, without holding the lock. */
+  private async waitOutCooldown(): Promise<void> {
+    const remaining = this.cooldownRemaining();
+    if (remaining > 0) {
+      await Application.sleep(Math.min(remaining, COOLDOWN_STEP_MS) / 1000);
     }
   }
 
@@ -230,36 +257,9 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     return Math.max(until - Date.now(), 0);
   }
 
-  /**
-   * If a penalty is running, wait out a short one without the lock, or fail a
-   * long one at once. Either way one page's penalty never blocks the others.
-   */
-  private awaitShortCooldownOrFail(index: number): void {
-    const remaining = this.cooldownRemaining();
-
-    if (remaining > COOLDOWN_WAIT_CAP_MS) {
-      throw new Error(
-        `Page ${index + 1} is waiting out the site's rate limit; it will load on its own shortly.`,
-      );
-    }
-  }
-
-  /** Fails a page the moment a long penalty is in force. */
-  private failIfCoolingDown(index: number): void {
-    if (this.cooldownRemaining() > COOLDOWN_WAIT_CAP_MS) {
-      throw new Error(
-        `Page ${index + 1} is waiting out the site's rate limit; it will load on its own shortly.`,
-      );
-    }
-  }
-
-  /** Holds the minimum gap between real calls, plus a short cooldown if any. */
+  /** Holds the minimum gap between real calls. The cooldown is handled before
+   * the lock, off it, so nothing is waited out here. */
   private async pace(): Promise<void> {
-    const shortCooldown = this.cooldownRemaining();
-    if (shortCooldown > 0 && shortCooldown <= COOLDOWN_WAIT_CAP_MS) {
-      await Application.sleep(shortCooldown / 1000);
-    }
-
     const gap = this.currentGap();
     const lastAt = (Application.getState(LAST_AT_KEY) as number | undefined) ?? 0;
     const since = Date.now() - lastAt;
@@ -381,41 +381,30 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
   }
 
   /** Performs one page resolution, refreshing the token once on a plain 403. */
-  private async mintPage(chapterId: string, index: number): Promise<string> {
-    let lastStatus = 0;
+  /**
+   * One attempt at resolving a page, refreshing an expired token once.
+   *
+   * Returns the URL on success, or `refused: true` when the site rate-limited
+   * it, so the caller can wait out the penalty off the lock and try again.
+   */
+  private async mintPage(
+    chapterId: string,
+    index: number,
+  ): Promise<{ url?: string; refused: boolean }> {
+    let result = await this.requestPage(chapterId, index, await this.tokenFor(chapterId));
 
-    for (let attempt = 0; attempt < PAGE_RETRY_ATTEMPTS; attempt += 1) {
-      const result = await this.requestPage(chapterId, index, await this.tokenFor(chapterId));
-
-      if (result.url) {
-        return result.url;
-      }
-
-      lastStatus = result.status;
-
-      if (result.status === 403 && !result.cloudflare) {
-        // A plain 403 means the token expired with the reader page that issued
-        // it; fetch a fresh one and go again straight away.
-        Application.setState(undefined, tokenKey(chapterId));
-        await this.pace();
-        continue;
-      }
-
-      // A refusal is recorded as a cooldown by requestPage. Do not sit here
-      // retrying under the lock - that is what froze every other page. Fail now
-      // and let the app fetch this page again once the cooldown has passed.
-      if (result.status === 429 || result.cloudflare) {
-        throw new Error(
-          `Page ${index + 1} of chapter ${chapterId} hit the site's rate limit; it will retry shortly.`,
-        );
-      }
-
-      break;
+    if (result.status === 403 && !result.cloudflare) {
+      // A plain 403 means the token expired; fetch a fresh one and go again.
+      Application.setState(undefined, tokenKey(chapterId));
+      await this.pace();
+      result = await this.requestPage(chapterId, index, await this.tokenFor(chapterId));
     }
 
-    throw new Error(
-      `Unable to resolve page ${index + 1} of chapter ${chapterId} (last status ${lastStatus})`,
-    );
+    if (result.url) {
+      return { url: result.url, refused: false };
+    }
+
+    return { refused: result.status === 429 || result.cloudflare === true };
   }
 
   private async requestPage(
