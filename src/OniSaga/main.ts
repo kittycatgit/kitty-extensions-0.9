@@ -22,6 +22,11 @@ import * as cheerio from "cheerio";
 import {
   DOMAIN,
   HOME_SECTIONS,
+  USER_AGENT,
+  WEBVIEW_BUDGET_MS,
+  WEBVIEW_GAP_MS,
+  WEBVIEW_PAGE_CAP,
+  buildPageResolverInject,
   pageMarkerUrl,
   readerUrl,
   type OniSagaSearchMetadata,
@@ -139,12 +144,84 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     this.interceptor.noteToken(chapter.chapterId, token);
     this.interceptor.noteMeteredRequest();
 
+    // Resolve a front batch inside a WebView, which the site rate-limits like
+    // the browser it is rather than like the app's HTTP client. Whatever comes
+    // back is handed to the reader as real addresses; everything else stays a
+    // lazy marker the interceptor resolves one at a time as the reader reaches
+    // it. If the WebView is unavailable or refused, the batch is null and every
+    // page is a marker - exactly the behaviour before this path existed.
+    const batch = await this.resolveViaWebView(mangaId, chapter.chapterId, token, total);
+
+    if (batch) {
+      const got = batch.urls.filter(Boolean).length;
+      console.log(
+        `[OniSaga] webview resolved ${got}/${batch.done} of ${total} pages in ${batch.ms}ms, rateLimited=${batch.rateLimited}`,
+      );
+    } else {
+      console.log(`[OniSaga] webview unavailable; ${total} pages will resolve lazily`);
+    }
+
     const pages: string[] = [];
     for (let index = 0; index < total; index += 1) {
-      pages.push(pageMarkerUrl(chapter.chapterId, index));
+      pages.push(batch?.urls[index] ?? pageMarkerUrl(chapter.chapterId, index));
     }
 
     return { id: chapter.chapterId, mangaId, pages };
+  }
+
+  /**
+   * Resolves a front batch of page addresses inside a WebView. The site treats
+   * a WebView's requests as a browser's - the fast rate limit - so the batch
+   * can be gathered at browser pace instead of the app client's ~1.7s floor.
+   * Returns the batch, or null if the WebView is unavailable or errors, so the
+   * caller can fall back to resolving every page lazily.
+   */
+  private async resolveViaWebView(
+    mangaId: string,
+    chapterId: string,
+    token: string,
+    total: number,
+  ): Promise<{ urls: (string | null)[]; done: number; rateLimited: boolean; ms: number } | null> {
+    const url = readerUrl(mangaId, chapterId);
+
+    try {
+      const outcome = await Application.executeInWebView({
+        source: {
+          html: "<html><head></head><body></body></html>",
+          baseUrl: url,
+          loadCSS: false,
+          loadImages: false,
+          userAgent: USER_AGENT,
+        },
+        inject: buildPageResolverInject(
+          chapterId,
+          token,
+          total,
+          WEBVIEW_PAGE_CAP,
+          WEBVIEW_GAP_MS,
+          WEBVIEW_BUDGET_MS,
+        ),
+        storage: { cookies: this.cookieStorage.cookiesForUrl(url) },
+      });
+
+      // Keep any fresh clearance the WebView earned along the way.
+      for (const cookie of outcome.storage.cookies) {
+        if (!cookie.expires || cookie.expires.getTime() > Date.now()) {
+          this.cookieStorage.setCookie(cookie);
+        }
+      }
+
+      return JSON.parse(String(outcome.result)) as {
+        urls: (string | null)[];
+        done: number;
+        rateLimited: boolean;
+        ms: number;
+      };
+    } catch {
+      // Older app builds answer executeInWebView with "Not Implemented", and
+      // any WebView failure should simply hand back to the lazy path.
+      return null;
+    }
   }
 
   async getSearchResults(

@@ -83,6 +83,74 @@ export function readerUrl(mangaId: string, chapterId: string): string {
 export const READER_TOKEN_HEADER = "X-Reader-Token";
 
 /**
+ * Tuning for the WebView page resolver.
+ *
+ * The site rate-limits the app's own HTTP client far more harshly than a real
+ * browser: from the app, page calls closer than ~1.7s apart earn a 429; from a
+ * browser the same calls at 250ms sail through, which points at the network
+ * fingerprint, not the headers. A WebView *is* a browser - WebKit, the engine
+ * Safari runs on - so resolving pages inside one lets them go at browser pace.
+ * This resolves a front batch up front so the reader opens with pages already
+ * in hand; the rest stay lazy markers the interceptor resolves as it reaches
+ * them. Kept modest so the reader still opens quickly if the batch is slow.
+ */
+export const WEBVIEW_PAGE_CAP = 20;
+export const WEBVIEW_GAP_MS = 250;
+export const WEBVIEW_BUDGET_MS = 6500;
+
+/**
+ * Builds the script the WebView runs: a paced loop that resolves each page's
+ * signed address through the same API the site's own reader calls, stopping at
+ * the cap, the time budget, or the first refusal. It returns a Promise -
+ * Paperback awaits it - that resolves with a JSON summary the caller parses.
+ */
+export function buildPageResolverInject(
+  chapterId: string,
+  token: string,
+  total: number,
+  cap: number,
+  gapMs: number,
+  budgetMs: number,
+): string {
+  return `
+return new Promise(function (resolve) {
+  var CID = ${JSON.stringify(chapterId)};
+  var TOK = ${JSON.stringify(token)};
+  var LIMIT = Math.min(${total}, ${cap});
+  var GAP = ${gapMs};
+  var BUDGET = ${budgetMs};
+  var HEADER = ${JSON.stringify(READER_TOKEN_HEADER)};
+  var urls = [];
+  var i = 0;
+  var rateLimited = false;
+  var started = Date.now();
+  function finish() {
+    resolve(JSON.stringify({ urls: urls, done: i, rateLimited: rateLimited, ms: Date.now() - started }));
+  }
+  function step() {
+    if (i >= LIMIT || Date.now() - started > BUDGET) { finish(); return; }
+    var headers = { accept: "application/json" };
+    headers[HEADER] = TOK;
+    fetch("/api/chapter/" + CID + "/page/" + i, { headers: headers })
+      .then(function (r) {
+        if (r.status === 429 || r.headers.get("cf-mitigated")) { rateLimited = true; return "STOP"; }
+        if (r.status !== 200) { return null; }
+        return r.json();
+      })
+      .then(function (payload) {
+        if (payload === "STOP") { finish(); return; }
+        urls.push(payload && payload.url ? payload.url : null);
+        i += 1;
+        setTimeout(step, GAP);
+      })
+      .catch(function () { urls.push(null); i += 1; setTimeout(step, GAP); });
+  }
+  step();
+});
+`;
+}
+
+/**
  * Minimum gap between page-resolution calls.
  *
  * The advertised allowance is 300, but there is a stricter burst limit behind
