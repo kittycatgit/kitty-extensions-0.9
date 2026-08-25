@@ -16,6 +16,9 @@ import {
   GAP_INCREASE_MS,
   GAP_KEY,
   HTML_GAP_MS,
+  KNOWN_BAD_KEY,
+  KNOWN_BAD_MARGIN_MS,
+  LAST_REFUSAL_KEY,
   MAX_PAGE_GAP_MS,
   MAX_RETRY_WAIT_MS,
   MIN_PAGE_GAP_MS,
@@ -23,6 +26,7 @@ import {
   PAGE_REQUEST_GAP_MS,
   PAGE_RETRY_ATTEMPTS,
   READER_TOKEN_HEADER,
+  REFUSAL_EPISODE_MS,
   STREAK_KEY,
   USER_AGENT,
   pageApiUrl,
@@ -223,6 +227,17 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     }
   }
 
+  /** The tightest pace worth trying: clear of any gap the site has refused. */
+  private safeFloor(): number {
+    const bad = Application.getState(KNOWN_BAD_KEY) as number | undefined;
+
+    if (typeof bad !== "number" || !Number.isFinite(bad)) {
+      return MIN_PAGE_GAP_MS;
+    }
+
+    return Math.min(Math.max(bad + KNOWN_BAD_MARGIN_MS, MIN_PAGE_GAP_MS), MAX_PAGE_GAP_MS);
+  }
+
   /** The gap in force, which rises after a refusal and eases back on success. */
   private currentGap(): number {
     const stored = Application.getState(GAP_KEY) as number | undefined;
@@ -231,7 +246,7 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
       return PAGE_REQUEST_GAP_MS;
     }
 
-    return Math.min(Math.max(stored, MIN_PAGE_GAP_MS), MAX_PAGE_GAP_MS);
+    return Math.min(Math.max(stored, this.safeFloor()), MAX_PAGE_GAP_MS);
   }
 
   /**
@@ -243,6 +258,28 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
    */
   private widenGap(reason: string): void {
     const from = this.currentGap();
+    const now = Date.now();
+    const lastRefusal = (Application.getState(LAST_REFUSAL_KEY) as number | undefined) ?? 0;
+    const followOn = now - lastRefusal < REFUSAL_EPISODE_MS;
+
+    Application.setState(now, LAST_REFUSAL_KEY);
+
+    // Only the first refusal of an episode says anything about the pace: the
+    // ones that follow are the site still refusing, and treating them as
+    // evidence taught a wall far slower than the real one.
+    if (!followOn) {
+      const bad = (Application.getState(KNOWN_BAD_KEY) as number | undefined) ?? 0;
+      if (from > bad) {
+        Application.setState(from, KNOWN_BAD_KEY);
+      }
+    }
+
+    if (followOn) {
+      // Already backed off for this episode; wait it out rather than widening
+      // again on every refusal it produces.
+      return;
+    }
+
     const next = Math.min(from + GAP_INCREASE_MS, MAX_PAGE_GAP_MS);
     Application.setState(next, GAP_KEY);
     Application.setState(0, STREAK_KEY);
@@ -262,7 +299,7 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
 
     Application.setState(0, STREAK_KEY);
     const from = this.currentGap();
-    const eased = Math.max(from - GAP_DECAY_MS, MIN_PAGE_GAP_MS);
+    const eased = Math.max(from - GAP_DECAY_MS, this.safeFloor());
 
     if (eased !== from) {
       Application.setState(eased, GAP_KEY);

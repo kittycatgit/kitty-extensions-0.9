@@ -127,6 +127,31 @@ export const MAX_RETRY_WAIT_MS = 8000;
  */
 export const HTML_GAP_MS = 700;
 
+/**
+ * The tightest gap the site has refused.
+ *
+ * Without this the gap eases back down into the same wall it just hit, is
+ * refused, backs off, and eases down again - a sawtooth that spends a retry
+ * and a cooldown on every lap. Remembering where the wall is lets the pace
+ * settle just clear of it instead of rediscovering it.
+ */
+export const KNOWN_BAD_KEY = "onisaga.knownBad";
+export const LAST_REFUSAL_KEY = "onisaga.lastRefusal";
+
+/**
+ * A refusal this soon after the previous one is treated as the same episode.
+ *
+ * The site keeps refusing for a moment after it first does, so those follow-on
+ * refusals say nothing about whether the current pace is too fast. Counting
+ * them was teaching the pace a wall far slower than the real one - it settled
+ * at twice the necessary gap - so only the first refusal of an episode is
+ * taken as evidence.
+ */
+export const REFUSAL_EPISODE_MS = 12_000;
+
+/** How far clear of a known refusal the pace is allowed to settle. */
+export const KNOWN_BAD_MARGIN_MS = 300;
+
 export const GAP_KEY = "onisaga.gap";
 export const STREAK_KEY = "onisaga.streak";
 
