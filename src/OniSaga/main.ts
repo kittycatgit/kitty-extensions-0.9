@@ -23,8 +23,6 @@ import {
   CHAPTER_CACHE_INDEX_KEY,
   CHAPTER_CACHE_MAX_ENTRIES,
   CHAPTER_CACHE_TTL_MS,
-  CHAPTER_LIST_INDEX_KEY,
-  CHAPTER_LIST_MAX_ENTRIES,
   DOMAIN,
   HOME_SECTIONS,
   USER_AGENT,
@@ -33,15 +31,12 @@ import {
   WEBVIEW_PAGE_CAP,
   WEBVIEW_START_CONCURRENCY,
   MINTS_KEY,
-  MINT_BUDGET,
   MINT_CEILING,
   MINT_WINDOW_MS,
   OBJECTING_COOLDOWN_MS,
   OBJECTING_UNTIL_KEY,
-  PREFETCH_DELAY_MS,
   buildChapterResolverInject,
   chapterCacheKey,
-  chapterListKey,
   pageMarkerUrl,
   readerUrl,
   type OniSagaSearchMetadata,
@@ -57,24 +52,16 @@ const SNAPSHOT_PAGE = "/top-manga";
 const BROWSE_PATH = "/top-manga";
 
 // Only ONE WebView pool may run at a time. Two overlapping pools double the
-// mint rate against the site's burst limit, so opens and prefetches queue
-// through this single tail - the native WebView cannot be stopped once it
-// starts, so not-starting-a-second is the only real guard. Module scope
-// persists across the native bridge the way `setState` does.
+// mint rate against the site's burst limit, so every resolution queues through
+// this single tail - the native WebView cannot be stopped once it starts, so
+// not-starting-a-second is the only real guard. Module scope persists across
+// the native bridge the way `setState` does.
 let poolTail: Promise<unknown> = Promise.resolve();
 
-// Greater than zero while a reader-driven open is in progress, so a prefetch
-// still dozing stands down rather than resolve on top of it.
-let openPending = 0;
-
-// Chapters a prefetch is already dozing on or resolving, so the same one is
-// not scheduled twice.
-const prefetchingIds = new Set<string>();
-
-/** Runs `work` with at most one pool alive across the whole extension: it
- * waits for whatever pool is ahead of it, then holds the tail until it is
- * done. A queued opener re-checks the cache once it is its turn, since the
- * pool ahead may have been resolving the very chapter it wants. */
+/** Runs `work` with at most one pool alive across the whole extension: it waits
+ * for whatever pool is ahead of it, then holds the tail until it is done. A
+ * queued opener re-checks the cache once it is its turn, since the pool ahead
+ * may have been resolving the very chapter it wants. */
 async function runExclusive<T>(work: () => Promise<T>): Promise<T> {
   const ahead = poolTail;
   let release!: () => void;
@@ -144,12 +131,6 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
       this.interceptor.noteChapterOwner(chapter.chapterId, sourceManga.mangaId);
     }
 
-    // The prefetcher needs to know what "next" means for this series.
-    this.storeChapterList(
-      sourceManga.mangaId,
-      chapters.map((c) => ({ id: c.chapterId, num: c.chapNum })).sort((a, b) => a.num - b.num),
-    );
-
     return chapters;
   }
 
@@ -176,7 +157,6 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
 
     if (cached && Date.now() - cached.at < CHAPTER_CACHE_TTL_MS) {
       console.log(`[OniSaga] chapter ${chapterId} served from cache (${cached.urls.length} pages)`);
-      this.advanceReading(mangaId, chapter);
       return { id: chapterId, mangaId, pages: cached.urls };
     }
 
@@ -185,12 +165,9 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
       Application.setState(undefined, chapterCacheKey(chapterId));
     }
 
-    // The reader is waiting, so any dozing prefetch must stand down, and the
-    // resolution runs through the single-flight: it waits out an in-flight
-    // pool (which may be a prefetch of this very chapter, cached by the time
-    // the turn comes), then resolves. Two pools never overlap, so a prefetch
-    // can never double the mint burst into the open.
-    openPending += 1;
+    // Resolution runs through the single-flight, so two chapter opens in quick
+    // succession never put two pools on the site at once - which would double
+    // the mint rate straight into a refusal.
 
     let outcome: WebViewChapterOutcome | null | "cached";
 
@@ -211,7 +188,6 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
         return this.resolveViaWebView(mangaId, chapterId);
       });
     } finally {
-      openPending -= 1;
     }
 
     if (outcome === "cached") {
@@ -222,7 +198,6 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
       console.log(
         `[OniSaga] chapter ${chapterId} arrived just-prefetched (${ready.urls.length} pages)`,
       );
-      this.advanceReading(mangaId, chapter);
       return { id: chapterId, mangaId, pages: ready.urls };
     }
 
@@ -268,7 +243,7 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
 
       // Every mint counts against the site's short-window budget - record it
       // so the prefetcher can see how close the ceiling is, and note when the
-      // site actually objected so no prefetch piles on during a penalty.
+      // site actually objected, which the next open's budget reads.
       this.recordMints(outcome.got ?? 0);
       if ((outcome.r429 ?? 0) > 0) {
         Application.setState(Date.now() + OBJECTING_COOLDOWN_MS, OBJECTING_UNTIL_KEY);
@@ -282,12 +257,6 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
         this.cacheChapter(chapterId, pages, Date.now() - outcome.ms);
       }
 
-      // Line up the next chapter behind this read - but only off a clean
-      // resolve: a 429 here means the site is already objecting.
-      if (complete && (outcome.r429 ?? 0) === 0) {
-        this.advanceReading(mangaId, chapter);
-      }
-
       return { id: chapterId, mangaId, pages };
     }
 
@@ -295,53 +264,6 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     // the way, and a challenge surfaces the app's own bypass rather than a
     // guess about what went wrong.
     return this.chapterDetailsViaApp(chapter, mangaId);
-  }
-
-  /**
-   * Lines up the NEXT chapter in reading order to resolve quietly behind the
-   * read, so opening it costs nothing. Deliberately cautious: it warms only
-   * the forward chapter (the overwhelmingly common move; a stray page-back
-   * must never send it minting a chapter the reader will not open), stands
-   * down while the site is objecting or the recent mint budget is tight, and
-   * never schedules the same chapter twice.
-   */
-  private advanceReading(mangaId: string, chapter: Chapter): void {
-    if (this.siteObjecting() || this.recentMints() > MINT_BUDGET) {
-      return;
-    }
-
-    const list = Application.getState(chapterListKey(mangaId)) as
-      | { id: string; num: number }[]
-      | undefined;
-
-    if (!list?.length) {
-      return;
-    }
-
-    const next = list.find((c) => c.num > chapter.chapNum);
-
-    if (!next || prefetchingIds.has(next.id)) {
-      return;
-    }
-
-    const ready = Application.getState(chapterCacheKey(next.id)) as
-      | { urls: string[]; at: number }
-      | undefined;
-
-    if (ready && Date.now() - ready.at < CHAPTER_CACHE_TTL_MS) {
-      return;
-    }
-
-    prefetchingIds.add(next.id);
-    // Floating on purpose - the read continues while this resolves behind it.
-    void this.prefetchChapter(mangaId, next.id);
-  }
-
-  /** True while a recent resolve met a 429 - the site is refusing, so the
-   * reader's own opens get the whole allowance to themselves. */
-  private siteObjecting(): boolean {
-    const until = Application.getState(OBJECTING_UNTIL_KEY) as number | undefined;
-    return until !== undefined && Date.now() < until;
   }
 
   /** How many page addresses have been minted in the recent window, pruned as
@@ -365,121 +287,6 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     ).filter((m) => m.at >= cutoff);
     marks.push({ at: Date.now(), n });
     Application.setState(marks, MINTS_KEY);
-  }
-
-  /**
-   * Resolves a chapter quietly behind the current read so that opening it
-   * later costs nothing. Best-effort by design: it waits out a delay first so
-   * its burst does not land on the site together with the chapter just opened,
-   * steps aside if the reader takes the work over, and swallows every failure -
-   * a chapter that fails to prefetch simply resolves the ordinary way when
-   * opened.
-   */
-  private async prefetchChapter(mangaId: string, chapterId: string): Promise<void> {
-    try {
-      // Let the chapter just opened settle first, so this burst does not land
-      // on the site alongside it.
-      await Application.sleep(PREFETCH_DELAY_MS / 1000);
-
-      // Re-check every reason to stand down after the doze: the reader may have
-      // opened something (its open comes first), the chapter may already be
-      // cached, or the site may have started objecting in the meantime.
-      if (openPending > 0 || this.siteObjecting() || this.recentMints() > MINT_BUDGET) {
-        return;
-      }
-
-      if (this.cachedFresh(chapterId)) {
-        return;
-      }
-
-      await runExclusive(async () => {
-        // Under the lock, the picture may have changed again - an open that
-        // resolved this very chapter just ahead, or one now waiting.
-        if (openPending > 0 || this.cachedFresh(chapterId)) {
-          return;
-        }
-
-        this.interceptor.noteChapterOwner(chapterId, mangaId);
-        const outcome = await this.resolveViaWebView(mangaId, chapterId);
-
-        if (outcome?.got) {
-          this.recordMints(outcome.got);
-        }
-
-        if ((outcome?.r429 ?? 0) > 0) {
-          Application.setState(Date.now() + OBJECTING_COOLDOWN_MS, OBJECTING_UNTIL_KEY);
-        }
-
-        if (!outcome?.urls || !outcome.total || outcome.total <= 0) {
-          return;
-        }
-
-        const pages: string[] = [];
-        let complete = true;
-
-        for (let index = 0; index < outcome.total; index += 1) {
-          const resolved = outcome.urls[index];
-
-          if (!resolved) {
-            complete = false;
-          }
-
-          pages.push(resolved ?? pageMarkerUrl(chapterId, index));
-        }
-
-        // Only a chapter resolved cleanly, with no refusal, is worth keeping:
-        // a 429-riddled prefetch is both incomplete and a sign to back off.
-        if (complete && (outcome.r429 ?? 0) === 0) {
-          if (outcome.token) {
-            this.interceptor.noteToken(chapterId, outcome.token);
-          }
-
-          this.cacheChapter(chapterId, pages, Date.now() - outcome.ms);
-          console.log(
-            `[OniSaga] prefetched chapter ${chapterId} behind the read (${outcome.got}/${outcome.total} in ${outcome.ms}ms)`,
-          );
-        }
-      });
-    } catch {
-      // Best-effort: the chapter resolves the ordinary way when opened.
-    } finally {
-      prefetchingIds.delete(chapterId);
-    }
-  }
-
-  /** True when a chapter is cached and still within the freshness window. */
-  private cachedFresh(chapterId: string): boolean {
-    const entry = Application.getState(chapterCacheKey(chapterId)) as
-      | { urls: string[]; at: number }
-      | undefined;
-    return entry !== undefined && Date.now() - entry.at < CHAPTER_CACHE_TTL_MS;
-  }
-
-  /**
-   * Remembers each series' ordered chapters for the prefetcher, trimmed the
-   * same way the chapter cache is so state holds only the series in use.
-   */
-  private storeChapterList(mangaId: string, list: { id: string; num: number }[]): void {
-    if (!list.length) {
-      return;
-    }
-
-    Application.setState(list, chapterListKey(mangaId));
-
-    const index = (
-      (Application.getState(CHAPTER_LIST_INDEX_KEY) as string[] | undefined) ?? []
-    ).filter((id) => id !== mangaId);
-    index.push(mangaId);
-
-    while (index.length > CHAPTER_LIST_MAX_ENTRIES) {
-      const oldest = index.shift();
-
-      if (oldest !== undefined) {
-        Application.setState(undefined, chapterListKey(oldest));
-      }
-    }
-
-    Application.setState(index, CHAPTER_LIST_INDEX_KEY);
   }
 
   /**

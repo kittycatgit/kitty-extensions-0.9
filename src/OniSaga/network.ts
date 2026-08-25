@@ -29,6 +29,8 @@ import {
   REFUSAL_EPISODE_MS,
   STREAK_KEY,
   USER_AGENT,
+  MINTS_KEY,
+  MINT_WINDOW_MS,
   pageApiUrl,
   pagesInfoUrl,
   parsePageMarker,
@@ -362,6 +364,17 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
   }
 
   /** Eases the gap back down once a run of requests has gone through cleanly. */
+  /** Records one minted address against the recent window the chapter opener
+   * reads for its burst budget, so pages resolved here are not invisible to it. */
+  private recordMint(): void {
+    const cutoff = Date.now() - MINT_WINDOW_MS;
+    const marks = (
+      (Application.getState(MINTS_KEY) as { at: number; n: number }[] | undefined) ?? []
+    ).filter((m) => m.at >= cutoff);
+    marks.push({ at: Date.now(), n: 1 });
+    Application.setState(marks, MINTS_KEY);
+  }
+
   private noteSuccess(): void {
     // Ease down steadily on a clean run; a gentle descent settles just above
     // the limit without provoking it.
@@ -474,6 +487,9 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
 
       if (body.url) {
         this.noteSuccess();
+        // Count it against the same window a chapter open reads, so the next
+        // open knows how much room is really left before the site refuses.
+        this.recordMint();
       }
 
       return { status: 200, ...(body.url ? { url: body.url } : {}) };

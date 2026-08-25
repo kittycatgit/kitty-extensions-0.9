@@ -243,6 +243,13 @@ return new Promise(function (resolve) {
     // window is near its ceiling; past it, the pool holds one-at-a-time, a rate
     // the site sustains, so a heavy read slows rather than trips.
     var BURST_BUDGET = ${burstBudget};
+    // The site sustains roughly one mint a second; past the burst budget the
+    // pool keeps to that rather than trip a refusal. It only crawls for a
+    // short while, though - a reader should not wait out a whole chapter at
+    // that rate, so the rest is left to resolve as it is reached.
+    var PAST_BUDGET_GAP = 900;
+    var PACED_TAIL_MS = 7000;
+    var pacedSince = 0;
     var LIMIT = Math.min(total, CAP);
     var MAX_REFRESHES = Math.ceil(LIMIT / 25) + 3;
     var refreshing = null;
@@ -300,9 +307,15 @@ return new Promise(function (resolve) {
       if (finished) { return; }
       if (Date.now() - poolStarted > BUDGET) { finish(); return; }
       if (queue.length === 0 && running === 0) { finish(); return; }
-      // Once the window's burst budget is spent, hold to one request at a time.
+      // Once the window's burst budget is spent, hold to one request at a time,
+      // and only for a short tail - long enough to carry the reader past the
+      // opening pages, not so long that the chapter takes a minute to open.
       var ceilNow = got < BURST_BUDGET ? MAX_C : 1;
       if (conc > ceilNow) { conc = ceilNow; }
+      if (got >= BURST_BUDGET) {
+        if (pacedSince === 0) { pacedSince = Date.now(); }
+        if (Date.now() - pacedSince > PACED_TAIL_MS && running === 0) { finish(); return; }
+      }
       var paused = Date.now() < pauseUntil;
       while (!paused && running < conc && queue.length > 0) {
         run(queue.shift());
@@ -375,7 +388,14 @@ return new Promise(function (resolve) {
           if (dropStreak >= 3) { conc = Math.max(1, conc - 1); dropStreak = 0; }
           requeue(idx);
         })
-        .then(function () { running -= 1; tick(); });
+        .then(function () {
+          running -= 1;
+          // Past the budget, put a real breath between calls. Holding to one at
+          // a time is not enough on its own - back to back at browser speed is
+          // still faster than the site sustains, which is how a heavy read
+          // crept up on the ceiling even while "paced".
+          if (got >= BURST_BUDGET) { setTimeout(tick, PAST_BUDGET_GAP); } else { tick(); }
+        });
     }
 
     tick();
