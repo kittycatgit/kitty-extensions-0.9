@@ -102,9 +102,17 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     }
 
     // Fail here rather than on the first page if the reader is not serving.
-    if (!/readerToken/.test(html)) {
+    const token = html.match(/readerToken['"]?\s*:\s*['"]([^'"]{8,})['"]/)?.[1];
+
+    if (!token) {
       throw new Error("The chapter is not ready to read yet; try again shortly.");
     }
+
+    // Hand over the token from the page just fetched, so resolving the first
+    // page does not fetch the very same page again, and count this request so
+    // the first resolution waits its turn rather than arriving on its heels.
+    this.interceptor.noteToken(chapter.chapterId, token);
+    this.interceptor.noteMeteredRequest();
 
     const pages: string[] = [];
     for (let index = 0; index < declared; index += 1) {

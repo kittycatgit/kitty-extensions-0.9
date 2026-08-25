@@ -126,7 +126,6 @@ export const MAX_RETRY_WAIT_MS = 8000;
  * moving around the app drags.
  */
 export const HTML_GAP_MS = 700;
-export const HTML_LAST_AT_KEY = "onisaga.htmlAt";
 
 export const GAP_KEY = "onisaga.gap";
 export const STREAK_KEY = "onisaga.streak";

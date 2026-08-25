@@ -16,7 +16,6 @@ import {
   GAP_INCREASE_MS,
   GAP_KEY,
   HTML_GAP_MS,
-  HTML_LAST_AT_KEY,
   MAX_PAGE_GAP_MS,
   MAX_RETRY_WAIT_MS,
   MIN_PAGE_GAP_MS,
@@ -100,6 +99,23 @@ const isPageApi = (url: string): boolean => /\/api\/chapter\/\d+\/page\/\d+/.tes
 export class OniSagaInterceptor extends PaperbackInterceptor {
   noteChapterOwner(chapterId: string, mangaId: string): void {
     Application.setState(mangaId, ownerKey(chapterId));
+  }
+
+  /**
+   * Stores a token already read from a reader page.
+   *
+   * Opening a chapter fetches that page anyway, so handing the token over here
+   * saves fetching the very same page a second time for it - two identical
+   * requests in a breath, right before the first page is asked for, which is
+   * what got the opening pages refused.
+   */
+  noteToken(chapterId: string, token: string): void {
+    Application.setState({ token, at: Date.now() } satisfies CachedToken, tokenKey(chapterId));
+  }
+
+  /** Records a metered request made elsewhere, so pacing accounts for it. */
+  noteMeteredRequest(): void {
+    Application.setState(Date.now(), LAST_AT_KEY);
   }
 
   override async interceptRequest(request: Request): Promise<Request> {
@@ -192,14 +208,16 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
 
     await lock(HTML_LOCK);
     try {
-      const lastAt = (Application.getState(HTML_LAST_AT_KEY) as number | undefined) ?? 0;
+      // One clock for every metered request: the site counts them together,
+      // so a resolution must not fire straight after a page fetch either.
+      const lastAt = (Application.getState(LAST_AT_KEY) as number | undefined) ?? 0;
       const since = Date.now() - lastAt;
 
       if (since >= 0 && since < HTML_GAP_MS) {
         await Application.sleep((HTML_GAP_MS - since) / 1000);
       }
 
-      Application.setState(Date.now(), HTML_LAST_AT_KEY);
+      Application.setState(Date.now(), LAST_AT_KEY);
     } finally {
       unlock(HTML_LOCK);
     }
