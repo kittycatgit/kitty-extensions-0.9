@@ -57,6 +57,7 @@ type WebViewChapterOutcome = {
   r403?: number;
   refreshes?: number;
   conc?: number;
+  odd?: Record<string, number>;
   ms: number;
   cf?: boolean;
   preparing?: boolean;
@@ -155,8 +156,11 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
 
     if (outcome?.urls && outcome.total && outcome.total > 0) {
       const total = outcome.total;
+      const odd = Object.keys(outcome.odd ?? {}).length
+        ? `, odd=${JSON.stringify(outcome.odd)}`
+        : "";
       console.log(
-        `[OniSaga] webview resolved ${outcome.got}/${Math.min(total, WEBVIEW_PAGE_CAP)} of ${total} pages in ${outcome.ms}ms, r429=${outcome.r429}, r403=${outcome.r403}, refreshes=${outcome.refreshes}, concurrency settled at ${outcome.conc}`,
+        `[OniSaga] webview resolved ${outcome.got}/${Math.min(total, WEBVIEW_PAGE_CAP)} of ${total} pages in ${outcome.ms}ms, r429=${outcome.r429}, r403=${outcome.r403}, refreshes=${outcome.refreshes}, concurrency settled at ${outcome.conc}${odd}`,
       );
 
       // The token the pool ended on is still fresh - hand it to the lazy path

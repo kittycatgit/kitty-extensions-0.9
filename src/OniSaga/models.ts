@@ -209,6 +209,7 @@ return new Promise(function (resolve) {
     var got = 0;
     var r429 = 0;
     var r403 = 0;
+    var odd = {};
     var refreshes = 0;
     var running = 0;
     var cleanStreak = 0;
@@ -221,7 +222,7 @@ return new Promise(function (resolve) {
     function finish() {
       if (finished) { return; }
       finished = true;
-      answer({ urls: results, total: total, token: token, got: got, r429: r429, r403: r403, refreshes: refreshes, conc: conc });
+      answer({ urls: results, total: total, token: token, got: got, r429: r429, r403: r403, refreshes: refreshes, conc: conc, odd: odd });
     }
 
     function requeue(idx) {
@@ -292,7 +293,14 @@ return new Promise(function (resolve) {
             if (token === sent) { return refreshToken(); }
             return null;
           }
-          if (r.status !== 200) { return null; }
+          if (r.status !== 200) {
+            // A 500 or a gateway hiccup is a transient, not a verdict - the
+            // same page minted fine moments later on device. Retry it like a
+            // drop, bounded, and count it so the log shows what the site said.
+            odd[r.status] = (odd[r.status] || 0) + 1;
+            requeue(idx);
+            return null;
+          }
           dropStreak = 0;
           // The token rolls forward: each reply carries the next one to use.
           // Ride it so the token never runs dry mid-chapter, which is what
@@ -300,7 +308,13 @@ return new Promise(function (resolve) {
           var next = r.headers.get("x-reader-token-next");
           if (next) { token = next; }
           return r.json().then(function (j) {
-            if (j && j.url) { results[idx] = j.url; got += 1; }
+            if (!(j && j.url)) {
+              odd.nourl = (odd.nourl || 0) + 1;
+              requeue(idx);
+              return;
+            }
+            results[idx] = j.url;
+            got += 1;
             cleanStreak += 1;
             if (cleanStreak % 6 === 0 && conc < MAX_C && Date.now() >= pauseUntil) { conc += 1; }
           });
