@@ -23,6 +23,7 @@ import {
   COOLDOWN_MAX_STEPS,
   COOLDOWN_STEP_MS,
   MIN_PAGE_GAP_MS,
+  REPROBE_AFTER,
   PAGE_REQUEST_GAP_MS,
   READER_TOKEN_HEADER,
   REFUSAL_EPISODE_MS,
@@ -90,6 +91,7 @@ let resolving = false;
 const CF_COOLDOWN_MS = 90_000;
 
 const LAST_AT_KEY = "onisaga.lastAt";
+const REPROBE_KEY = "onisaga.reprobe";
 const BLOCKED_UNTIL_KEY = "onisaga.blockedUntil";
 const pageKey = (chapterId: string, index: number): string => `onisaga.page.${chapterId}.${index}`;
 const tokenKey = (chapterId: string): string => `onisaga.token.${chapterId}`;
@@ -333,6 +335,7 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     const followOn = now - lastRefusal < REFUSAL_EPISODE_MS;
 
     Application.setState(now, LAST_REFUSAL_KEY);
+    Application.setState(0, REPROBE_KEY);
 
     // Only the first refusal of an episode says anything about the pace: the
     // ones that follow are the site still refusing, and treating them as
@@ -360,9 +363,8 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
 
   /** Eases the gap back down once a run of requests has gone through cleanly. */
   private noteSuccess(): void {
-    // Ease down slowly and steadily. A quick descent used to run straight into
-    // the rate limit on a fresh chapter and trip it; a gentle one settles just
-    // above the limit without provoking it.
+    // Ease down steadily on a clean run; a gentle descent settles just above
+    // the limit without provoking it.
     const streak = ((Application.getState(STREAK_KEY) as number | undefined) ?? 0) + 1;
 
     if (streak < GAP_DECAY_AFTER) {
@@ -372,11 +374,37 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
 
     Application.setState(0, STREAK_KEY);
     const from = this.currentGap();
-    const eased = Math.max(from - GAP_DECAY_MS, this.safeFloor());
+    const floor = this.safeFloor();
 
-    if (eased !== from) {
+    if (from > floor) {
+      const eased = Math.max(from - GAP_DECAY_MS, floor);
       Application.setState(eased, GAP_KEY);
       console.log(`[OniSaga] clean run: gap ${from}ms -> ${eased}ms`);
+      return;
+    }
+
+    // Already settled at the floor. On a sustained clean run, relax the
+    // remembered wall a step so the pace can probe a little faster - what once
+    // tripped the limit may be fine now, or may never have been the true wall.
+    const clean = ((Application.getState(REPROBE_KEY) as number | undefined) ?? 0) + 1;
+
+    if (clean < REPROBE_AFTER) {
+      Application.setState(clean, REPROBE_KEY);
+      return;
+    }
+
+    Application.setState(0, REPROBE_KEY);
+    const bad = Application.getState(KNOWN_BAD_KEY) as number | undefined;
+
+    if (typeof bad === "number" && bad - GAP_DECAY_MS >= MIN_PAGE_GAP_MS) {
+      Application.setState(bad - GAP_DECAY_MS, KNOWN_BAD_KEY);
+      const eased = Math.max(from - GAP_DECAY_MS, this.safeFloor());
+      Application.setState(eased, GAP_KEY);
+      console.log(`[OniSaga] probing faster: gap ${from}ms -> ${eased}ms`);
+    } else if (from - GAP_DECAY_MS >= MIN_PAGE_GAP_MS) {
+      const eased = from - GAP_DECAY_MS;
+      Application.setState(eased, GAP_KEY);
+      console.log(`[OniSaga] probing faster: gap ${from}ms -> ${eased}ms`);
     }
   }
 

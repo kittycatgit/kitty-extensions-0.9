@@ -118,7 +118,18 @@ export const MAX_PAGE_GAP_MS = 6000;
 export const GAP_INCREASE_MS = 750;
 export const GAP_DECAY_MS = 150;
 /** Consecutive successes before easing the gap back down. */
-export const GAP_DECAY_AFTER = 6;
+export const GAP_DECAY_AFTER = 5;
+
+/**
+ * After this many clean pages at the settled floor, probe a little faster.
+ *
+ * Finding the wall once and then holding well above it for the rest of a long
+ * chapter wastes time on pages that would have been served quicker. So after a
+ * sustained clean run the remembered wall is relaxed a step, letting the pace
+ * creep toward what the connection actually allows; a fresh refusal pushes it
+ * straight back.
+ */
+export const REPROBE_AFTER = 12;
 
 /**
  * A refused page is retried rather than abandoned.
@@ -177,7 +188,7 @@ export const COOLDOWN_STEP_MS = 12_000;
 export const COOLDOWN_MAX_STEPS = 8;
 
 /** How far clear of a known refusal the pace is allowed to settle. */
-export const KNOWN_BAD_MARGIN_MS = 500;
+export const KNOWN_BAD_MARGIN_MS = 300;
 
 export const GAP_KEY = "onisaga.gap";
 export const STREAK_KEY = "onisaga.streak";
