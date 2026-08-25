@@ -117,6 +117,37 @@ export function chapterCacheKey(chapterId: string): string {
 }
 
 /**
+ * How long after a chapter opens before the NEXT one is resolved behind the
+ * read. Late enough that the two chapters' bursts do not land on the site
+ * together, early enough that even a quick read of a short chapter finds the
+ * next one waiting - and the addresses are still fresh when the reader arrives.
+ */
+export const PREFETCH_DELAY_MS = 30_000;
+
+/** Ordered chapter lists kept per series so the prefetcher knows what "next"
+ * means; trimmed to the few series being read, like the chapter cache. */
+export const CHAPTER_LIST_INDEX_KEY = "onisaga.chapters.index";
+export const CHAPTER_LIST_MAX_ENTRIES = 3;
+
+export function chapterListKey(mangaId: string): string {
+  return `onisaga.chapters.${mangaId}`;
+}
+
+/** Budget awareness for the prefetcher. The site refuses after roughly 200
+ * mints in a couple of minutes, so a prefetch checks how many addresses have
+ * been minted lately and stands down if adding a chapter's worth would crowd
+ * that ceiling - the reader's own opens always come first. */
+export const MINT_WINDOW_MS = 100_000;
+export const MINT_BUDGET = 90;
+export const MINTS_KEY = "onisaga.mints";
+
+/** When a resolve meets a 429 the site is actively objecting; no prefetch runs
+ * for a while afterwards so the reader's next open is not made to share the
+ * penalty. */
+export const OBJECTING_COOLDOWN_MS = 120_000;
+export const OBJECTING_UNTIL_KEY = "onisaga.objecting";
+
+/**
  * Builds the script the WebView runs: the entire chapter open, in the browser.
  *
  * It fetches the reader page itself (so the throttled app client makes no call
