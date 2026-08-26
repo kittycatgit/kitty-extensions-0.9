@@ -146,7 +146,7 @@ export const CHAPTER_BATCH = 500;
 export type KaynSearchMetadata = {
   page?: number;
   sort?: string;
-  genreIds?: number[];
+  genreIds?: string[];
   status?: string;
   type?: string;
   completed?: boolean;

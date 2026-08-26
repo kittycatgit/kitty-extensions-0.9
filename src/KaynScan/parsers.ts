@@ -40,12 +40,38 @@ function usable(candidate: string | null | undefined): string {
   return FALLBACK_COVER;
 }
 
-/** Genres arrive either as objects or as bare names depending on the route. */
-function genreNames(series: ApiSeries): string[] {
-  return (series.genres ?? [])
-    .map((genre) => (typeof genre === "string" ? genre : (genre?.name ?? "")))
-    .map((name) => name.trim())
-    .filter((name) => name.length > 0);
+/**
+ * Genres arrive either as objects or as bare names depending on the route.
+ *
+ * A tag's id crosses the bridge and so must keep to the characters ids may use;
+ * a name like "slice of life" has spaces in it and would be refused, taking the
+ * whole series with it. The site's own numeric id is used where there is one,
+ * and a name is reduced to something legal where there is not.
+ */
+function genreTags(series: ApiSeries): { id: string; title: string }[] {
+  const tags: { id: string; title: string }[] = [];
+
+  for (const genre of series.genres ?? []) {
+    const title = (typeof genre === "string" ? genre : (genre?.name ?? "")).trim();
+
+    if (!title) {
+      continue;
+    }
+
+    const id =
+      typeof genre === "string" || genre?.id === undefined
+        ? title
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "")
+        : String(genre.id);
+
+    if (id) {
+      tags.push({ id, title });
+    }
+  }
+
+  return tags;
 }
 
 /**
@@ -125,16 +151,8 @@ function statusOf(raw: string | null | undefined): string {
  * printed with its tags showing.
  */
 export function toSourceManga($: CheerioAPI, series: ApiSeries, mangaId: string): SourceManga {
-  const names = genreNames(series);
-  const tagGroups: TagSection[] = names.length
-    ? [
-        {
-          id: "genres",
-          title: "Genres",
-          tags: names.map((name) => ({ id: name.toLowerCase(), title: name })),
-        },
-      ]
-    : [];
+  const tags = genreTags(series);
+  const tagGroups: TagSection[] = tags.length ? [{ id: "genres", title: "Genres", tags }] : [];
 
   const synopsis = series.postContent ? $(`<div>${series.postContent}</div>`).text().trim() : "";
   const type = (series.seriesType ?? "").trim();

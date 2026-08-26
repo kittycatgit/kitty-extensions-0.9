@@ -103,7 +103,7 @@ export class KaynScanSearchForm extends AdvancedSearchForm {
   }
 
   override getSearchQueryMetadata(): KaynSearchMetadata {
-    const ids = this.genreIds.map((id) => Number(id)).filter((id) => Number.isFinite(id));
+    const ids = this.genreIds.filter((id) => id.trim().length > 0);
 
     return {
       ...(this.sort[0] ? { sort: this.sort[0] } : {}),

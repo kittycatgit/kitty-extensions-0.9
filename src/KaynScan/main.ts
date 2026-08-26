@@ -273,7 +273,7 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
         items: genres.map((genre) => ({
           type: "genresCarouselItem" as const,
           name: (genre.name ?? "").trim(),
-          searchQuery: { title: "", metadata: { genreIds: [genre.id] } as Metadata },
+          searchQuery: { title: "", metadata: { genreIds: [String(genre.id)] } as Metadata },
         })),
         metadata: { completed: true },
       };
