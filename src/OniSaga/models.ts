@@ -69,8 +69,15 @@ export const READER_TOKEN_HEADER = "X-Reader-Token";
  * higher, easing off on its own if the connection objects.
  */
 export const WEBVIEW_PAGE_CAP = 140;
-export const WEBVIEW_START_CONCURRENCY = 4;
-export const WEBVIEW_MAX_CONCURRENCY = 5;
+// Two at a time, which is what the site's own reader allows itself. Its code
+// says so in as many words - a preload cap of two, "never a parallel blast" -
+// and it only ever reaches six pages ahead of where the reader is sitting.
+// Paperback wants every address before it will open a chapter, so the whole
+// chapter has to be minted rather than a window of it; matching the site on
+// the one thing that can be matched - how much arrives at once - is what keeps
+// that from reading as a scrape.
+export const WEBVIEW_START_CONCURRENCY = 2;
+export const WEBVIEW_MAX_CONCURRENCY = 2;
 export const WEBVIEW_BUDGET_MS = 26_000;
 
 /** A resolved chapter is kept briefly so re-opening it costs nothing. The
@@ -94,22 +101,28 @@ export function chapterCacheKey(chapterId: string): string {
  * mints in a couple of minutes, so a prefetch checks how many addresses have
  * been minted lately and stands down if adding a chapter's worth would crowd
  * that ceiling - the reader's own opens always come first. */
-export const MINT_WINDOW_MS = 120_000;
-export const MINTS_KEY = "onisaga.mints";
+/**
+ * The one dial: how long to wait between minting one page and the next.
+ *
+ * The site has a burst limiter nobody outside it can see - the published
+ * allowance of 300 a window is not what refuses a reader, since refusals arrive
+ * with nearly all of it unspent - and it is not the same for every connection:
+ * a desktop browser sails through what a phone is refused for. So there is no
+ * right number to write down here. Instead the gap starts at nothing and the
+ * site itself sets it: a chapter that met a refusal widens it a step, a chapter
+ * that came back clean narrows it, and it settles wherever that connection is
+ * actually allowed to sit.
+ */
+export const MINT_GAP_KEY = "onisaga.gap";
+export const GAP_START_MS = 250;
+export const GAP_MIN_MS = 150;
+export const GAP_STEP_UP_MS = 350;
+export const GAP_STEP_DOWN_MS = 50;
+export const GAP_MAX_MS = 2_000;
 
-/** Roughly how many addresses the site will mint for one reader inside the
- * window before it starts refusing (with a long penalty). A chapter open
- * bursts freely up to whatever of this is left, then paces itself down to a
- * sustainable one-at-a-time crawl so a heavy reader glides under the ceiling
- * instead of slamming into it and stalling for minutes. Kept conservatively
- * below where a device log first saw refusals (~150). */
-export const MINT_CEILING = 130;
-
-/** When a resolve meets a 429 the site is actively objecting; no prefetch runs
- * for a while afterwards so the reader's next open is not made to share the
- * penalty. */
-export const OBJECTING_COOLDOWN_MS = 120_000;
-export const OBJECTING_UNTIL_KEY = "onisaga.objecting";
+/** A refusal the site asked us to sit out longer than this is not worth waiting
+ * on with a reader watching; say so instead. */
+export const MAX_WAIT_OUT_MS = 12_000;
 
 /**
  * Builds the script the WebView runs to mint a chapter's page addresses.
@@ -139,7 +152,7 @@ export function buildChapterMintInject(
   startConcurrency: number,
   maxConcurrency: number,
   budgetMs: number,
-  burstBudget: number,
+  gapMs: number,
 ): string {
   return `
 return new Promise(function (resolve) {
@@ -147,13 +160,11 @@ return new Promise(function (resolve) {
   var READER = ${JSON.stringify(readerUrl)};
   var MAX_C = ${maxConcurrency};
   var BUDGET = ${budgetMs};
-  var BURST_BUDGET = ${burstBudget};
+  var GAP = ${gapMs};
+  var MAX_WAIT = ${MAX_WAIT_OUT_MS};
   var HEADER = ${JSON.stringify(READER_TOKEN_HEADER)};
   var LIMIT = Math.min(${total}, ${cap});
-  var LONG_PENALTY = 10000;
   var MAX_ATTEMPTS = 6;
-  var PAST_BUDGET_GAP = 900;
-  var PACED_TAIL_MS = 7000;
   var MAX_REFRESHES = Math.ceil(LIMIT / 25) + 3;
   var started = Date.now();
   var token = ${JSON.stringify(token)};
@@ -171,11 +182,16 @@ return new Promise(function (resolve) {
   var dropStreak = 0;
   var attempts = {};
   var pauseUntil = 0;
-  var pacedSince = 0;
+  var waited = 0;
   var cf = false;
   var refreshing = null;
   var finished = false;
   var resumePending = false;
+
+  // Whatever happens to the requests in flight, this answers. A fetch that
+  // never settles would otherwise leave the reader on a blank screen with the
+  // extension waiting on a promise that can no longer be resolved by anything.
+  setTimeout(function () { finish(); }, BUDGET + 3000);
 
   function finish() {
     if (finished) { return; }
@@ -213,15 +229,6 @@ return new Promise(function (resolve) {
     if (finished) { return; }
     if (Date.now() - started > BUDGET) { finish(); return; }
     if (queue.length === 0 && running === 0) { finish(); return; }
-    // Once the window's burst budget is spent, hold to one request at a time,
-    // and only for a short tail - long enough to carry the reader past the
-    // opening pages, not so long that the chapter takes a minute to open.
-    var ceilNow = got < BURST_BUDGET ? MAX_C : 1;
-    if (conc > ceilNow) { conc = ceilNow; }
-    if (got >= BURST_BUDGET) {
-      if (pacedSince === 0) { pacedSince = Date.now(); }
-      if (Date.now() - pacedSince > PACED_TAIL_MS && running === 0) { finish(); return; }
-    }
     var paused = Date.now() < pauseUntil;
     while (!paused && running < conc && queue.length > 0) {
       run(queue.shift());
@@ -241,13 +248,28 @@ return new Promise(function (resolve) {
     headers[HEADER] = sent;
     fetch("/api/chapter/" + CID + "/page/" + idx, { headers: headers })
       .then(function (r) {
+        // A challenge arrives as a 403 carrying cf-mitigated. Test that first,
+        // or it is mistaken for a rate refusal and the reader is never offered
+        // the verification that would actually let them through.
+        if (r.status === 403 && r.headers.get("cf-mitigated")) {
+          cf = true;
+          queue.length = 0;
+          return null;
+        }
         if (r.status === 429 || r.headers.get("cf-mitigated")) {
           r429 += 1;
           cleanStreak = 0;
           conc = 1;
           var ra = parseInt(r.headers.get("retry-after") || "0", 10) * 1000;
-          if (ra > LONG_PENALTY) { queue.length = 0; return null; }
-          pauseUntil = Date.now() + (ra > 0 ? ra : 1200);
+          if (ra > waited) { waited = ra; }
+          var wait = ra > 0 ? ra : 1200;
+          // Sit out a short penalty and carry on; a long one is not something
+          // to keep a reader waiting through, so stop and let them be told.
+          if (wait > MAX_WAIT || Date.now() + wait - started > BUDGET) {
+            queue.length = 0;
+            return null;
+          }
+          pauseUntil = Date.now() + wait;
           requeue(idx);
           return null;
         }
@@ -278,7 +300,7 @@ return new Promise(function (resolve) {
           urls[idx] = j.url;
           got += 1;
           cleanStreak += 1;
-          if (cleanStreak % 6 === 0 && conc < MAX_C && got < BURST_BUDGET && Date.now() >= pauseUntil) {
+          if (cleanStreak % 6 === 0 && conc < MAX_C && Date.now() >= pauseUntil) {
             conc += 1;
           }
         });
@@ -292,9 +314,8 @@ return new Promise(function (resolve) {
       })
       .then(function () {
         running -= 1;
-        // Past the budget, put a real breath between calls: one at a time at
-        // browser speed is still quicker than the site sustains.
-        if (got >= BURST_BUDGET) { setTimeout(tick, PAST_BUDGET_GAP); } else { tick(); }
+        // Whatever gap this connection has settled on, keep to it.
+        if (GAP > 0) { setTimeout(tick, GAP); } else { tick(); }
       });
   }
 

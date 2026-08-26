@@ -2,6 +2,7 @@
 /* Copyright © 2026 kittycatgit */
 
 import {
+  CloudflareError,
   CookieStorageInterceptor,
   DiscoverSectionType,
   type Chapter,
@@ -30,11 +31,12 @@ import {
   WEBVIEW_MAX_CONCURRENCY,
   WEBVIEW_PAGE_CAP,
   WEBVIEW_START_CONCURRENCY,
-  MINTS_KEY,
-  MINT_CEILING,
-  MINT_WINDOW_MS,
-  OBJECTING_COOLDOWN_MS,
-  OBJECTING_UNTIL_KEY,
+  GAP_MAX_MS,
+  GAP_MIN_MS,
+  GAP_START_MS,
+  GAP_STEP_DOWN_MS,
+  GAP_STEP_UP_MS,
+  MINT_GAP_KEY,
   buildChapterMintInject,
   chapterCacheKey,
   readerUrl,
@@ -214,11 +216,10 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
       `[OniSaga] minted ${outcome.got}/${total} pages in ${outcome.ms}ms, r429=${outcome.r429}, r403=${outcome.r403}, refreshes=${outcome.refreshes}, concurrency ${outcome.conc}${odd}`,
     );
 
-    this.recordMints(outcome.got ?? 0);
-
-    if ((outcome.r429 ?? 0) > 0) {
-      Application.setState(Date.now() + OBJECTING_COOLDOWN_MS, OBJECTING_UNTIL_KEY);
-    }
+    // The site's answer sets the pace for next time: refused, and the gap
+    // widens a step; clean, and it narrows. Nothing here is a guess about what
+    // the limit is - only which way to lean after what just happened.
+    this.adjustGap((outcome.r429 ?? 0) > 0);
 
     const pages: string[] = [];
 
@@ -257,7 +258,13 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     token: string,
     total: number,
   ): Promise<WebViewChapterOutcome | null> {
-    const burstBudget = Math.max(0, MINT_CEILING - this.recentMints());
+    const gap = this.currentGap();
+
+    // Room to finish at whatever pace this connection has settled on, so a
+    // chapter is not cut short simply for being long or the gap being wide.
+    // Room to finish at the site's own cadence, however long the chapter is -
+    // being cut short means the chapter does not open at all.
+    const budgetMs = Math.min(90_000, Math.max(WEBVIEW_BUDGET_MS, total * (gap + 700) + 8_000));
 
     try {
       const outcome = await Application.executeInWebView({
@@ -276,8 +283,8 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
           WEBVIEW_PAGE_CAP,
           WEBVIEW_START_CONCURRENCY,
           WEBVIEW_MAX_CONCURRENCY,
-          WEBVIEW_BUDGET_MS,
-          burstBudget,
+          budgetMs,
+          gap,
         ),
         storage: { cookies: this.cookieStorage.cookiesForUrl(url) },
       });
@@ -291,41 +298,50 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
       const parsed = JSON.parse(String(outcome.result)) as WebViewChapterOutcome;
 
       if (parsed.cf) {
-        console.log(
-          `[OniSaga] webview met bot verification while minting chapter ${chapterId}; falling back to the slow path`,
+        // Bot verification, not a rate limit. Say so properly: this is the one
+        // failure the reader can actually clear, and reporting it as anything
+        // else leaves them retrying a chapter that will not open until they do.
+        console.log(`[OniSaga] bot verification while minting chapter ${chapterId}`);
+        throw new CloudflareError(
+          {
+            url: DOMAIN,
+            method: "GET",
+            headers: { referer: `${DOMAIN}/`, "user-agent": USER_AGENT },
+          },
+          "Bot verification detected, bypass it to continue!",
         );
       }
 
       return parsed;
     } catch (error) {
-      console.log(
-        `[OniSaga] webview could not mint chapter ${chapterId} (${String(error)}); falling back to the slow path`,
-      );
+      if (error instanceof CloudflareError) {
+        throw error;
+      }
+
+      console.log(`[OniSaga] webview could not mint chapter ${chapterId} (${String(error)})`);
       return null;
     }
   }
 
   /** How many page addresses have been minted in the recent window, pruned as
    * it reads, so the prefetcher can keep clear of the site's burst ceiling. */
-  private recentMints(): number {
-    const marks =
-      (Application.getState(MINTS_KEY) as { at: number; n: number }[] | undefined) ?? [];
-    const cutoff = Date.now() - MINT_WINDOW_MS;
-    return marks.filter((m) => m.at >= cutoff).reduce((sum, m) => sum + m.n, 0);
+  /** The gap this connection has settled on between mints. */
+  private currentGap(): number {
+    const stored = Application.getState(MINT_GAP_KEY) as number | undefined;
+    return Math.min(Math.max(stored ?? GAP_START_MS, GAP_MIN_MS), GAP_MAX_MS);
   }
 
-  /** Records a burst of mints against the recent window. */
-  private recordMints(n: number): void {
-    if (n <= 0) {
-      return;
-    }
+  /** Widens the gap a step after a refusal, narrows it after a clean chapter. */
+  private adjustGap(refused: boolean): void {
+    const from = this.currentGap();
+    const to = refused
+      ? Math.min(from + GAP_STEP_UP_MS, GAP_MAX_MS)
+      : Math.max(from - GAP_STEP_DOWN_MS, GAP_MIN_MS);
 
-    const cutoff = Date.now() - MINT_WINDOW_MS;
-    const marks = (
-      (Application.getState(MINTS_KEY) as { at: number; n: number }[] | undefined) ?? []
-    ).filter((m) => m.at >= cutoff);
-    marks.push({ at: Date.now(), n });
-    Application.setState(marks, MINTS_KEY);
+    if (to !== from) {
+      Application.setState(to, MINT_GAP_KEY);
+      console.log(`[OniSaga] ${refused ? "refused" : "clean"}: gap ${from}ms -> ${to}ms`);
+    }
   }
 
   /**
