@@ -69,15 +69,16 @@ export const READER_TOKEN_HEADER = "X-Reader-Token";
  * higher, easing off on its own if the connection objects.
  */
 export const WEBVIEW_PAGE_CAP = 140;
-// Two at a time, which is what the site's own reader allows itself. Its code
-// says so in as many words - a preload cap of two, "never a parallel blast" -
-// and it only ever reaches six pages ahead of where the reader is sitting.
-// Paperback wants every address before it will open a chapter, so the whole
-// chapter has to be minted rather than a window of it; matching the site on
-// the one thing that can be matched - how much arrives at once - is what keeps
-// that from reading as a scrape.
-export const WEBVIEW_START_CONCURRENCY = 2;
-export const WEBVIEW_MAX_CONCURRENCY = 2;
+// The site's own reader holds itself to two at a time, but it only ever wants
+// six pages; Paperback will not open a chapter without every address, so the
+// same restraint here costs a reader half a minute of waiting per chapter and
+// buys very little. The device says as much: three chapters went through at
+// four and five at a time without a murmur, and the refusal came only once
+// enough pages had been asked for overall. What the site minds is how much is
+// taken over a stretch, not how quickly one chapter arrives - so a chapter is
+// minted briskly, and the gap below is what answers for volume.
+export const WEBVIEW_START_CONCURRENCY = 4;
+export const WEBVIEW_MAX_CONCURRENCY = 5;
 export const WEBVIEW_BUDGET_MS = 26_000;
 
 /** A resolved chapter is kept briefly so re-opening it costs nothing. The
@@ -114,15 +115,15 @@ export function chapterCacheKey(chapterId: string): string {
  * actually allowed to sit.
  */
 export const MINT_GAP_KEY = "onisaga.gap";
-export const GAP_START_MS = 250;
-export const GAP_MIN_MS = 150;
+export const GAP_START_MS = 0;
+export const GAP_MIN_MS = 0;
 export const GAP_STEP_UP_MS = 350;
-export const GAP_STEP_DOWN_MS = 50;
+export const GAP_STEP_DOWN_MS = 150;
 export const GAP_MAX_MS = 2_000;
 
 /** A refusal the site asked us to sit out longer than this is not worth waiting
  * on with a reader watching; say so instead. */
-export const MAX_WAIT_OUT_MS = 12_000;
+export const MAX_WAIT_OUT_MS = 20_000;
 
 /**
  * Builds the script the WebView runs to mint a chapter's page addresses.
@@ -196,7 +197,7 @@ return new Promise(function (resolve) {
   function finish() {
     if (finished) { return; }
     finished = true;
-    resolve(JSON.stringify({ urls: urls, total: ${total}, token: token, got: got, r429: r429, r403: r403, refreshes: refreshes, conc: conc, cf: cf, odd: odd, ms: Date.now() - started }));
+    resolve(JSON.stringify({ urls: urls, total: ${total}, token: token, got: got, r429: r429, r403: r403, refreshes: refreshes, conc: conc, cf: cf, odd: odd, waited: waited, ms: Date.now() - started }));
   }
 
   function requeue(idx) {

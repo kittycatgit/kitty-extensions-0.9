@@ -90,6 +90,7 @@ type WebViewChapterOutcome = {
   refreshes?: number;
   conc?: number;
   odd?: Record<string, number>;
+  waited?: number;
   ms: number;
   cf?: boolean;
   preparing?: boolean;
@@ -231,8 +232,11 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
       // way of fetching the rest, and that quiet hand-off is what turned a
       // ten-second open into minutes without ever saying so.
       if (!resolved) {
+        const asked = Math.round((outcome.waited ?? 0) / 1000);
         throw new Error(
-          `Only ${outcome.got} of ${total} pages of chapter ${chapterId} could be loaded. Open it again in a moment.`,
+          asked > 0
+            ? `The site is asking for about ${asked} seconds before it will hand over more pages. Open this chapter again then.`
+            : `Only ${outcome.got} of ${total} pages of chapter ${chapterId} could be loaded. Open it again in a moment.`,
         );
       }
 
