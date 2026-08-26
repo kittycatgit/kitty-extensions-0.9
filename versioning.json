@@ -1,5 +1,5 @@
 {
-  "buildTime": "2026-08-26T05:51:26.011Z",
+  "buildTime": "2026-08-26T16:10:57.376Z",
   "builtWith": {
     "toolchain": "1.0.0-alpha.92",
     "types": "1.0.0-alpha.92"
@@ -192,6 +192,29 @@
         }
       ],
       "id": "ScytheScans"
+    },
+    {
+      "name": "TCB Scans",
+      "description": "Extension that pulls content from tcbonepiecechapters.com.",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "language": "en",
+      "contentRating": "SAFE",
+      "capabilities": [
+        1,
+        64,
+        4,
+        16
+      ],
+      "badges": [],
+      "developers": [
+        {
+          "name": "kittycatgit",
+          "website": "https://github.com/kittycatgit",
+          "github": "https://github.com/kittycatgit"
+        }
+      ],
+      "id": "TCBScans"
     },
     {
       "name": "ToonTop",
