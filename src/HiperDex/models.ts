@@ -101,6 +101,19 @@ export const LATEST_PAGE_SIZE = 40;
 /** Widest rating the API will return; the app does its own filtering per item. */
 export const MAX_RATING = "pornographic";
 
+/**
+ * Chapter counts for search results.
+ *
+ * The search procedure returns no chapter information at all - only the series
+ * itself, its rating and its genres - so a count has to be asked for per
+ * series. They are fetched for a whole page of results in one batched request
+ * and kept, since a series' length changes rarely and the same titles come back
+ * on every repeat search and every scroll.
+ */
+export const CHAPTER_COUNT_TTL_MS = 12 * 60 * 60_000;
+export const CHAPTER_COUNT_MAX = 400;
+export const CHAPTER_COUNT_KEY = "hiperdex.chapterCounts";
+
 export const TYPE_OPTIONS: Tag[] = [
   { id: "manhwa", title: "Manhwa" },
   { id: "manga", title: "Manga" },

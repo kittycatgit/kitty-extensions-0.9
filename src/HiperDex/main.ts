@@ -30,6 +30,9 @@ import {
   GENRES,
   GENRES_SECTION_ID,
   LATEST_SECTION_ID,
+  CHAPTER_COUNT_KEY,
+  CHAPTER_COUNT_MAX,
+  CHAPTER_COUNT_TTL_MS,
   MAX_RATING,
   LATEST_PAGE_SIZE,
   PAGE_SIZE,
@@ -49,6 +52,16 @@ import { contentRatingOf, parseChapterPages, parseChapters, parseMangaDetails } 
 import type pbconfigType from "./pbconfig";
 
 const DOMAIN = "https://hiperdex.tv";
+
+/**
+ * Stand-in for a series with no artwork.
+ *
+ * An empty address is rejected outright, and because a row's items are
+ * converted together one blank cover takes the whole row down with it. This is
+ * a real address that holds no image, so the app falls through to its own
+ * placeholder instead of being handed nothing.
+ */
+const FALLBACK_COVER = `${DOMAIN}/_no-cover.png`;
 
 /**
  * The reader route rejects any call that does not carry this header. Its name
@@ -384,8 +397,10 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
     const total = response?.totalHits ?? 0;
     const nextOffset = offset + hits.length;
 
+    const counts = await this.chapterCounts(hits);
+
     return {
-      items: hits.map((hit) => this.searchItem(hit)),
+      items: hits.map((hit) => this.searchItem(hit, counts.get(hit.id))),
       metadata:
         hits.length > 0 && nextOffset < total
           ? compact({
@@ -401,10 +416,75 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
     };
   }
 
-  private searchItem(hit: ApiSeries): SearchResultItem {
+  /**
+   * Chapter counts for a page of search hits, in one request.
+   *
+   * Search itself reports nothing about chapters, so each series has to be
+   * asked about; batching turns thirty questions into one round trip, and what
+   * comes back is kept for a while, since a series' length rarely changes and
+   * the same titles reappear on every scroll and every repeat search. A series
+   * that cannot be counted simply goes without - the result still shows.
+   */
+  private async chapterCounts(hits: ApiSeries[]): Promise<Map<number, number>> {
+    const store =
+      (Application.getState(CHAPTER_COUNT_KEY) as
+        | Record<string, { n: number; at: number }>
+        | undefined) ?? {};
+    const counts = new Map<number, number>();
+    const fresh = Date.now() - CHAPTER_COUNT_TTL_MS;
+    const missing: ApiSeries[] = [];
+
+    for (const hit of hits) {
+      const held = store[String(hit.id)];
+
+      if (held && held.at >= fresh) {
+        counts.set(hit.id, held.n);
+      } else {
+        missing.push(hit);
+      }
+    }
+
+    if (missing.length === 0) {
+      return counts;
+    }
+
+    const answers = await this.api.queryEach<ApiChapter[]>(
+      "series.chapters",
+      missing.map((hit) => ({ seriesId: hit.id })),
+    );
+
+    let learned = false;
+
+    answers.forEach((rows, index) => {
+      const hit = missing[index];
+
+      if (!hit || !Array.isArray(rows)) {
+        return;
+      }
+
+      counts.set(hit.id, rows.length);
+      store[String(hit.id)] = { n: rows.length, at: Date.now() };
+      learned = true;
+    });
+
+    if (learned) {
+      // Keep only the newest entries, so this cannot grow without end.
+      const trimmed = Object.entries(store)
+        .sort(([, a], [, b]) => b.at - a.at)
+        .slice(0, CHAPTER_COUNT_MAX);
+      Application.setState(Object.fromEntries(trimmed), CHAPTER_COUNT_KEY);
+    }
+
+    return counts;
+  }
+
+  private searchItem(hit: ApiSeries, chapters?: number): SearchResultItem {
     const bits: string[] = [];
     if (hit.type) {
       bits.push(hit.type.charAt(0).toUpperCase() + hit.type.slice(1));
+    }
+    if (chapters !== undefined && chapters > 0) {
+      bits.push(`${chapters} chapter${chapters === 1 ? "" : "s"}`);
     }
     if (typeof hit.score === "number") {
       bits.push(`${hit.score.toFixed(1)}/5`);
@@ -413,7 +493,7 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
     return {
       mangaId: hit.slug,
       title: hit.title?.trim() || hit.slug,
-      imageUrl: hit.coverUrl ?? "",
+      imageUrl: hit.coverUrl || FALLBACK_COVER,
       contentRating: contentRatingOf(hit.contentRating),
       ...(bits.length > 0 ? { subtitle: bits.join(" • ") } : {}),
     };
@@ -492,7 +572,7 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
         ? {
             type: "featuredCarouselItem" as const,
             mangaId: row.slug,
-            imageUrl: row.coverUrl ?? "",
+            imageUrl: row.coverUrl || FALLBACK_COVER,
             title: row.title?.trim() || row.slug,
             contentRating: contentRatingOf(row.contentRating),
             ...(row.synopsis?.trim() ? { summary: row.synopsis.trim() } : {}),
@@ -501,7 +581,7 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
         : {
             type: "simpleCarouselItem" as const,
             mangaId: row.slug,
-            imageUrl: row.coverUrl ?? "",
+            imageUrl: row.coverUrl || FALLBACK_COVER,
             title: row.title?.trim() || row.slug,
             contentRating: contentRatingOf(row.contentRating),
             ...(row.latestChapter ? { subtitle: `Chapter ${row.latestChapter.number}` } : {}),
@@ -537,7 +617,7 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
         type: "chapterUpdatesCarouselItem",
         mangaId: row.seriesSlug,
         chapterId: String(newest.number),
-        imageUrl: row.seriesCoverUrl ?? "",
+        imageUrl: row.seriesCoverUrl || FALLBACK_COVER,
         title: row.seriesTitle?.trim() || row.seriesSlug,
         subtitle: `Chapter ${newest.number}`,
         ...(published && !Number.isNaN(published.getTime()) ? { publishDate: published } : {}),

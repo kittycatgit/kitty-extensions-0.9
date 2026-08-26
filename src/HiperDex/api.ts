@@ -68,6 +68,44 @@ export class HiperDexApi {
   }
 
   /**
+   * Calls one procedure once for each input, in a single request.
+   *
+   * tRPC takes a batch keyed by position and answers with a reply per entry, so
+   * asking about thirty series costs one round trip rather than thirty. A
+   * failed entry comes back as undefined rather than sinking the rest - this is
+   * used to decorate results, and a decoration is never worth losing them over.
+   */
+  async queryEach<T>(procedure: string, inputs: unknown[]): Promise<(T | undefined)[]> {
+    if (inputs.length === 0) {
+      return [];
+    }
+
+    const payload: Record<number, { json: unknown }> = {};
+    inputs.forEach((input, index) => {
+      payload[index] = { json: input ?? null };
+    });
+
+    const url = `${this.domain}/api/trpc/${inputs.map(() => procedure).join(",")}?batch=1&input=${encodeURIComponent(JSON.stringify(payload))}`;
+
+    try {
+      const [response, buffer] = await Application.scheduleRequest({ url, method: "GET" });
+
+      if (response.status !== 200) {
+        return inputs.map(() => undefined);
+      }
+
+      const envelopes = JSON.parse(Application.arrayBufferToUTF8String(buffer)) as TrpcEnvelope[];
+
+      return inputs.map((_, index) => {
+        const envelope = envelopes[index];
+        return envelope?.error ? undefined : (envelope?.result?.data?.json as T | undefined);
+      });
+    } catch {
+      return inputs.map(() => undefined);
+    }
+  }
+
+  /**
    * Calls a procedure, priming the session once if the API reports the request
    * as unauthenticated.
    */

@@ -9,7 +9,8 @@ import {
   type Tag,
   type TagSection,
 } from "@paperback/types";
-import type { CheerioAPI } from "cheerio";
+import type { Cheerio, CheerioAPI } from "cheerio";
+import type { Element } from "domhandler";
 
 import { STATUS_LABELS } from "./models";
 
@@ -25,6 +26,37 @@ export function slugFromHref(href: string | undefined): string | undefined {
 export function chapterIdFromHref(href: string | undefined): string | undefined {
   const path = (href ?? "").split(/[?#]/)[0]?.replace(/\/+$/, "");
   return path?.split("/").filter(Boolean).pop();
+}
+
+/**
+ * Picks an image address off an element that may not have loaded yet.
+ *
+ * The site lazy-loads its artwork: the real address sits in one of the data
+ * attributes and `src` holds a placeholder, or nothing at all, until the
+ * browser gets to it. Reading `src` alone therefore works on some pages and
+ * quietly returns a blank on others - which is how a series could show its
+ * cover in a listing and then have none on its own page.
+ */
+function imageFrom(element: Cheerio<Element>): string | undefined {
+  const candidates = [
+    element.attr("data-src"),
+    element.attr("data-lazy-src"),
+    element.attr("data-cfsrc"),
+    element.attr("data-original"),
+    element.attr("srcset")?.split(",")[0]?.trim().split(" ")[0],
+    element.attr("src"),
+  ];
+
+  for (const candidate of candidates) {
+    const value = candidate?.trim();
+
+    // A data: URI here is the placeholder, never the artwork.
+    if (value && !value.startsWith("data:")) {
+      return value;
+    }
+  }
+
+  return undefined;
 }
 
 function absolute(domain: string, src: string | undefined): string {
@@ -58,13 +90,7 @@ export function parseListing($: CheerioAPI, domain: string): SearchResultItem[] 
     items.push({
       mangaId,
       title: title || mangaId,
-      imageUrl: absolute(
-        domain,
-        image.attr("data-src") ??
-          image.attr("data-lazy-src") ??
-          image.attr("data-cfsrc") ??
-          image.attr("src"),
-      ),
+      imageUrl: absolute(domain, imageFrom(image)) || `${domain}/_no-cover.png`,
       ...(subtitle ? { subtitle } : {}),
     });
   }
@@ -158,11 +184,16 @@ export function parseMangaDetails($: CheerioAPI, mangaId: string, domain: string
     mangaInfo: {
       primaryTitle,
       secondaryTitles,
-      thumbnailUrl: absolute(
-        domain,
-        $("meta[property='og:image']").attr("content") ??
-          $("#mangaSummary img").first().attr("src"),
-      ),
+      // A cover that comes back empty is rejected outright, so this ends at a
+      // real address that simply holds no image and lets the app draw its own
+      // placeholder, rather than handing back nothing.
+      thumbnailUrl:
+        absolute(
+          domain,
+          $("meta[property='og:image']").attr("content")?.trim() ||
+            imageFrom($("#mangaSummary img").first()) ||
+            imageFrom($(".manga-poster img, .summary_image img, .thumb img").first()),
+        ) || `${domain}/_no-cover.png`,
       synopsis,
       contentRating: ContentRating.MATURE,
       shareUrl: `${domain}/manhwa/${mangaId}/`,
