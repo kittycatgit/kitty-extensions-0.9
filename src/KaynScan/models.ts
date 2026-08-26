@@ -43,7 +43,10 @@ export type ApiSeries = {
   seriesType?: string | null;
   seriesStatus?: string | null;
   hot?: boolean;
+  isNew?: boolean;
   isPinned?: boolean;
+  lastChapterAddedAt?: string | null;
+  updatedAt?: string | null;
   averageRating?: number | null;
   genres?: ({ id?: number; name?: string } | string)[] | null;
   chapters?: ApiChapter[] | null;
@@ -61,6 +64,21 @@ export type ApiChapter = {
 };
 
 export type ApiGenre = { id?: number; name?: string };
+
+/** The catalogue reply behind the home page: comics, novels, and their counts. */
+export type ApiPosts = {
+  posts?: ApiSeries[];
+  novelPosts?: ApiSeries[];
+};
+
+/** A series carries a few of its most recent chapters in the catalogue reply. */
+export type ApiRecentChapter = {
+  id?: string | number;
+  number?: number | string;
+  createdAt?: string | null;
+  isLocked?: boolean;
+  isAccessible?: boolean;
+};
 
 /** A chapter as its own route returns it: images for a comic, text for a novel. */
 export type ApiChapterDetail = {
@@ -122,19 +140,27 @@ export function chapterApiUrl(chapterId: string): string {
 }
 
 export const POPULAR_SECTION_ID = "popular";
+export const MOST_POPULAR_SECTION_ID = "mostPopular";
+export const RELEASES_SECTION_ID = "releases";
 export const LATEST_SECTION_ID = "latest";
+export const NOVELS_SECTION_ID = "novels";
 export const GENRES_SECTION_ID = "genres";
 
 /**
  * What the home screen shows.
  *
- * The site's own front page leads with what is popular today and then what has
- * just been posted, so those are the two rows of titles; the genre row is what
- * makes its couple of hundred tags reachable without typing them.
+ * These are the rows the site's own front page carries, in its order and under
+ * its names, and they come from the one request it makes for them - the whole
+ * catalogue at once, which is then cut into rows here exactly as the site cuts
+ * it there. Novels sit in their own list on that reply, so they get their own
+ * row rather than being mixed in.
  */
 export const HOME_SECTIONS = [
   { id: POPULAR_SECTION_ID, title: "Popular Today" },
+  { id: RELEASES_SECTION_ID, title: "Latest Releases" },
+  { id: MOST_POPULAR_SECTION_ID, title: "Most Popular" },
   { id: LATEST_SECTION_ID, title: "Latest Updates" },
+  { id: NOVELS_SECTION_ID, title: "Novels" },
   { id: GENRES_SECTION_ID, title: "Genres" },
 ] as const;
 
@@ -156,6 +182,16 @@ export const SORTS: SortingOption[] = [
 ];
 
 export const DEFAULT_SORT = "latest";
+
+/** The whole catalogue in one reply, which is how the site builds its own home
+ * page. It is asked for once and kept a short while, since every row is cut
+ * from it and asking per row would fetch the same half a megabyte each time. */
+export const POSTS_URL = `${API}/posts?perPage=500`;
+export const HOME_STATE_KEY = "kaynscan.home";
+export const HOME_TTL_MS = 10 * 60_000;
+
+/** How much of a row is worth keeping; the app pages through what it is given. */
+export const ROW_CAP = 60;
 
 /** Titles per page of results, and chapters per request. */
 export const PAGE_SIZE = 30;

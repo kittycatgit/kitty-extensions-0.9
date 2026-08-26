@@ -26,12 +26,17 @@ import {
   CHAPTER_BATCH,
   DEFAULT_SORT,
   GENRES_SECTION_ID,
-  GENRE_STATE_KEY,
-  GENRE_TTL_MS,
   HOME_SECTIONS,
+  HOME_STATE_KEY,
+  HOME_TTL_MS,
+  MOST_POPULAR_SECTION_ID,
+  NOVELS_SECTION_ID,
   PAGE_SIZE,
   POPULAR_ORDER,
   POPULAR_SECTION_ID,
+  POSTS_URL,
+  RELEASES_SECTION_ID,
+  ROW_CAP,
   SORTS,
   chapterApiUrl,
   fromId,
@@ -39,17 +44,20 @@ import {
   type ApiChapterDetail,
   type ApiGenre,
   type ApiListing,
+  type ApiPosts,
   type ApiSeries,
   type KaynSearchMetadata,
 } from "./models";
 import { KaynScanInterceptor } from "./network";
 import {
+  toHomeRows,
   seriesSubtitle,
   toChapters,
   toNovelHtml,
   toPages,
   toSearchResult,
   toSourceManga,
+  type HomeRows,
 } from "./parsers";
 import type pbconfigType from "./pbconfig";
 
@@ -116,28 +124,32 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
     return { posts: data.posts ?? [], total: data.totalCount ?? 0 };
   }
 
-  /** The site's own genre list, kept briefly so a filter form opens at once. */
+  /**
+   * The whole catalogue, as the site's own front page asks for it.
+   *
+   * Every row is cut from this one reply, so it is asked for once and kept a
+   * short while; fetching per row would pull the same half a megabyte six times
+   * over. What is kept is only what the rows need, not the reply itself.
+   */
+  private async home(): Promise<HomeRows> {
+    const held = Application.getState(HOME_STATE_KEY) as { rows: HomeRows; at: number } | undefined;
+
+    if (held && Date.now() - held.at < HOME_TTL_MS) {
+      return held.rows;
+    }
+
+    const payload = await this.json<ApiPosts>(POSTS_URL);
+    const rows = toHomeRows(payload, ROW_CAP);
+
+    Application.setState({ rows, at: Date.now() }, HOME_STATE_KEY);
+    return rows;
+  }
+
+  /** The genres actually worn by something in the catalogue, so each one leads
+   * somewhere. They come from the same reply the rows do. */
   private async genres(): Promise<ApiGenre[]> {
-    const held = Application.getState(GENRE_STATE_KEY) as
-      | { genres: ApiGenre[]; at: number }
-      | undefined;
-
-    if (held && Date.now() - held.at < GENRE_TTL_MS) {
-      return held.genres;
-    }
-
-    try {
-      const fetched = await this.json<ApiGenre[]>(`${API}/genres`);
-      const genres = (Array.isArray(fetched) ? fetched : [])
-        .filter((genre) => genre?.id !== undefined && (genre.name ?? "").trim().length > 0)
-        .sort((left, right) => (left.name ?? "").localeCompare(right.name ?? ""));
-
-      Application.setState({ genres, at: Date.now() }, GENRE_STATE_KEY);
-      return genres;
-    } catch {
-      // A filter form without its genres is still worth opening.
-      return held?.genres ?? [];
-    }
+    const rows = await this.home();
+    return rows.genres.map((genre) => ({ id: Number(genre.id), name: genre.title }));
   }
 
   async getMangaDetails(mangaId: string): Promise<SourceManga> {
@@ -282,7 +294,9 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
       type:
         entry.id === GENRES_SECTION_ID
           ? DiscoverSectionType.genres
-          : DiscoverSectionType.simpleCarousel,
+          : entry.id === RELEASES_SECTION_ID
+            ? DiscoverSectionType.chapterUpdates
+            : DiscoverSectionType.simpleCarousel,
     }));
   }
 
@@ -296,51 +310,75 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
       return { items: [] };
     }
 
-    if (section.id === GENRES_SECTION_ID) {
-      const genres = await this.genres();
+    const rows = await this.home();
 
+    if (section.id === GENRES_SECTION_ID) {
       return {
-        items: genres.map((genre) => ({
+        items: rows.genres.map((genre) => ({
           type: "genresCarouselItem" as const,
-          name: (genre.name ?? "").trim(),
-          searchQuery: { title: "", metadata: { genreIds: [String(genre.id)] } as Metadata },
+          name: genre.title,
+          searchQuery: { title: "", metadata: { genreIds: [genre.id] } as Metadata },
         })),
         metadata: { completed: true },
       };
     }
 
-    // The two rows differ by the order they ask for, so each keeps its own -
-    // sharing one would put the same titles under both headings.
-    const sort = section.id === POPULAR_SECTION_ID ? POPULAR_ORDER : DEFAULT_SORT;
-    const page = paging?.page ?? 1;
-    const { posts, total } = await this.listing(page, { sort });
+    // Just-posted chapters, each opening the chapter itself rather than only
+    // the series it belongs to.
+    if (section.id === RELEASES_SECTION_ID) {
+      return {
+        items: rows.releases.flatMap((release) => {
+          const result = toSearchResult(release.series);
 
-    const items = posts.flatMap((post) => {
-      const result = toSearchResult(post);
+          if (!result) {
+            return [];
+          }
 
-      if (!result) {
-        return [];
-      }
+          return [
+            {
+              type: "chapterUpdatesCarouselItem" as const,
+              mangaId: result.mangaId,
+              chapterId: release.chapterId,
+              title: result.title,
+              imageUrl: result.imageUrl,
+              ...(release.number > 0 ? { subtitle: `Chapter ${release.number}` } : {}),
+            },
+          ];
+        }),
+        metadata: { completed: true },
+      };
+    }
 
-      const subtitle = seriesSubtitle(post);
-
-      return [
-        {
-          type: "simpleCarouselItem" as const,
-          mangaId: result.mangaId,
-          title: result.title,
-          imageUrl: result.imageUrl,
-          ...(subtitle ? { subtitle } : {}),
-        },
-      ];
-    });
+    const series =
+      section.id === POPULAR_SECTION_ID
+        ? rows.popular
+        : section.id === MOST_POPULAR_SECTION_ID
+          ? rows.mostPopular
+          : section.id === NOVELS_SECTION_ID
+            ? rows.novels
+            : rows.latest;
 
     return {
-      items,
-      metadata:
-        items.length > 0 && page * PAGE_SIZE < total
-          ? ({ sort, page: page + 1 } satisfies KaynSearchMetadata)
-          : { completed: true },
+      items: series.flatMap((post) => {
+        const result = toSearchResult(post);
+
+        if (!result) {
+          return [];
+        }
+
+        const subtitle = seriesSubtitle(post);
+
+        return [
+          {
+            type: "simpleCarouselItem" as const,
+            mangaId: result.mangaId,
+            title: result.title,
+            imageUrl: result.imageUrl,
+            ...(subtitle ? { subtitle } : {}),
+          },
+        ];
+      }),
+      metadata: { completed: true },
     };
   }
 

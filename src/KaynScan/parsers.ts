@@ -17,6 +17,8 @@ import {
   toId,
   type ApiChapter,
   type ApiChapterDetail,
+  type ApiPosts,
+  type ApiRecentChapter,
   type ApiSeries,
 } from "./models";
 
@@ -211,6 +213,83 @@ export function toChapters(rows: ApiChapter[], sourceManga: SourceManga): Chapte
   }
 
   return chapters;
+}
+
+/** A row of the home screen, cut from the catalogue reply. */
+export type HomeRows = {
+  popular: ApiSeries[];
+  mostPopular: ApiSeries[];
+  latest: ApiSeries[];
+  novels: ApiSeries[];
+  releases: { series: ApiSeries; chapterId: string; number: number; at: number }[];
+  genres: { id: string; title: string }[];
+};
+
+function addedAt(series: ApiSeries): number {
+  const stamp = series.lastChapterAddedAt ?? series.updatedAt ?? null;
+  const time = stamp ? new Date(stamp).getTime() : 0;
+  return Number.isFinite(time) ? time : 0;
+}
+
+/**
+ * The home screen's rows, cut from the single reply the site's own front page
+ * asks for.
+ *
+ * Each row is the site's own idea of itself: what it marks as hot today, what
+ * is rated highest, what has just had a chapter posted, and the novels it keeps
+ * in a list of their own. The genres are the ones actually worn by something
+ * here, so every one of them leads somewhere.
+ */
+export function toHomeRows(payload: ApiPosts, cap: number): HomeRows {
+  const posts = (payload.posts ?? []).filter((series) => (series.slug ?? "").trim().length > 0);
+  const novels = (payload.novelPosts ?? []).filter((s) => (s.slug ?? "").trim().length > 0);
+
+  const rated = [...posts].sort(
+    (left, right) => (right.averageRating ?? 0) - (left.averageRating ?? 0),
+  );
+  const recent = [...posts].sort((left, right) => addedAt(right) - addedAt(left));
+
+  const releases: HomeRows["releases"] = [];
+  for (const series of posts) {
+    for (const chapter of (series.chapters ?? []) as ApiRecentChapter[]) {
+      const chapterId = chapter.id === undefined ? "" : String(chapter.id);
+
+      // A chapter still behind a timer or a price cannot be opened, so it is
+      // not offered as something just released.
+      if (!chapterId || chapter.isLocked === true || chapter.isAccessible === false) {
+        continue;
+      }
+
+      const at = chapter.createdAt ? new Date(chapter.createdAt).getTime() : 0;
+      releases.push({
+        series,
+        chapterId,
+        number: Number(chapter.number) || 0,
+        at: Number.isFinite(at) ? at : 0,
+      });
+    }
+  }
+  releases.sort((left, right) => right.at - left.at);
+
+  const genres = new Map<string, string>();
+  for (const series of [...posts, ...novels]) {
+    for (const tag of genreTags(series)) {
+      if (!genres.has(tag.id)) {
+        genres.set(tag.id, tag.title);
+      }
+    }
+  }
+
+  return {
+    popular: posts.filter((series) => series.hot === true).slice(0, cap),
+    mostPopular: rated.slice(0, cap),
+    latest: recent.slice(0, cap),
+    novels: novels.slice(0, cap),
+    releases: releases.slice(0, cap),
+    genres: [...genres.entries()]
+      .map(([id, title]) => ({ id, title }))
+      .sort((left, right) => left.title.localeCompare(right.title)),
+  };
 }
 
 /** A comic chapter's pages, in the order the site gives them. */
