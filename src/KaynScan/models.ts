@@ -140,8 +140,10 @@ export function chapterApiUrl(chapterId: string): string {
 }
 
 export const POPULAR_SECTION_ID = "popular";
-export const MOST_POPULAR_SECTION_ID = "mostPopular";
 export const RELEASES_SECTION_ID = "releases";
+export const NEW_SECTION_ID = "new";
+export const COMPLETED_SECTION_ID = "completed";
+export const MOST_POPULAR_SECTION_ID = "mostPopular";
 export const LATEST_SECTION_ID = "latest";
 export const NOVELS_SECTION_ID = "novels";
 export const GENRES_SECTION_ID = "genres";
@@ -149,17 +151,19 @@ export const GENRES_SECTION_ID = "genres";
 /**
  * What the home screen shows.
  *
- * These are the rows the site's own front page carries, in its order and under
- * its names, and they come from the one request it makes for them - the whole
- * catalogue at once, which is then cut into rows here exactly as the site cuts
- * it there. Novels sit in their own list on that reply, so they get their own
- * row rather than being mixed in.
+ * These are the rows the site's own front page carries - what it marks hot
+ * today, what has just been released, what it calls new, what has finished,
+ * what is rated highest and what has just updated - plus the novels it keeps in
+ * a list of their own. All of them are cut from the one request it makes for
+ * the catalogue, so six rows cost one fetch rather than six.
  */
 export const HOME_SECTIONS = [
   { id: POPULAR_SECTION_ID, title: "Popular Today" },
   { id: RELEASES_SECTION_ID, title: "Latest Releases" },
-  { id: MOST_POPULAR_SECTION_ID, title: "Most Popular" },
+  { id: NEW_SECTION_ID, title: "New Series" },
   { id: LATEST_SECTION_ID, title: "Latest Updates" },
+  { id: MOST_POPULAR_SECTION_ID, title: "Most Popular" },
+  { id: COMPLETED_SECTION_ID, title: "Completed" },
   { id: NOVELS_SECTION_ID, title: "Novels" },
   { id: GENRES_SECTION_ID, title: "Genres" },
 ] as const;
@@ -191,7 +195,10 @@ export const HOME_STATE_KEY = "kaynscan.home";
 export const HOME_TTL_MS = 10 * 60_000;
 
 /** How much of a row is worth keeping; the app pages through what it is given. */
-export const ROW_CAP = 60;
+export const ROW_CAP = 180;
+
+/** How much of a row is handed over at a time, so a long row pages. */
+export const ROW_PAGE = 30;
 
 /** Titles per page of results, and chapters per request. */
 export const PAGE_SIZE = 30;

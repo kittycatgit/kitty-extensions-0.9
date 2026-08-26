@@ -29,7 +29,9 @@ import {
   HOME_SECTIONS,
   HOME_STATE_KEY,
   HOME_TTL_MS,
+  COMPLETED_SECTION_ID,
   MOST_POPULAR_SECTION_ID,
+  NEW_SECTION_ID,
   NOVELS_SECTION_ID,
   PAGE_SIZE,
   POPULAR_ORDER,
@@ -37,6 +39,7 @@ import {
   POSTS_URL,
   RELEASES_SECTION_ID,
   ROW_CAP,
+  ROW_PAGE,
   SORTS,
   chapterApiUrl,
   fromId,
@@ -51,7 +54,6 @@ import {
 import { KaynScanInterceptor } from "./network";
 import {
   toHomeRows,
-  seriesSubtitle,
   toChapters,
   toNovelHtml,
   toPages,
@@ -323,62 +325,57 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
       };
     }
 
+    // A row hands over a page at a time; the app asks for the next when the
+    // reader reaches the end of one.
+    const page = paging?.page ?? 0;
+    const from = page * ROW_PAGE;
+
     // Just-posted chapters, each opening the chapter itself rather than only
     // the series it belongs to.
     if (section.id === RELEASES_SECTION_ID) {
+      const slice = rows.releases.slice(from, from + ROW_PAGE);
+
       return {
-        items: rows.releases.flatMap((release) => {
-          const result = toSearchResult(release.series);
-
-          if (!result) {
-            return [];
-          }
-
-          return [
-            {
-              type: "chapterUpdatesCarouselItem" as const,
-              mangaId: result.mangaId,
-              chapterId: release.chapterId,
-              title: result.title,
-              imageUrl: result.imageUrl,
-              ...(release.number > 0 ? { subtitle: `Chapter ${release.number}` } : {}),
-            },
-          ];
-        }),
-        metadata: { completed: true },
+        items: slice.map((release) => ({
+          type: "chapterUpdatesCarouselItem" as const,
+          mangaId: release.mangaId,
+          chapterId: release.chapterId,
+          title: release.title,
+          imageUrl: release.imageUrl,
+          ...(release.subtitle ? { subtitle: release.subtitle } : {}),
+        })),
+        metadata:
+          from + ROW_PAGE < rows.releases.length
+            ? ({ page: page + 1 } satisfies KaynSearchMetadata)
+            : { completed: true },
       };
     }
 
-    const series =
+    const row =
       section.id === POPULAR_SECTION_ID
         ? rows.popular
-        : section.id === MOST_POPULAR_SECTION_ID
-          ? rows.mostPopular
-          : section.id === NOVELS_SECTION_ID
-            ? rows.novels
-            : rows.latest;
+        : section.id === NEW_SECTION_ID
+          ? rows.fresh
+          : section.id === COMPLETED_SECTION_ID
+            ? rows.completed
+            : section.id === MOST_POPULAR_SECTION_ID
+              ? rows.mostPopular
+              : section.id === NOVELS_SECTION_ID
+                ? rows.novels
+                : rows.latest;
 
     return {
-      items: series.flatMap((post) => {
-        const result = toSearchResult(post);
-
-        if (!result) {
-          return [];
-        }
-
-        const subtitle = seriesSubtitle(post);
-
-        return [
-          {
-            type: "simpleCarouselItem" as const,
-            mangaId: result.mangaId,
-            title: result.title,
-            imageUrl: result.imageUrl,
-            ...(subtitle ? { subtitle } : {}),
-          },
-        ];
-      }),
-      metadata: { completed: true },
+      items: row.slice(from, from + ROW_PAGE).map((item) => ({
+        type: "simpleCarouselItem" as const,
+        mangaId: item.mangaId,
+        title: item.title,
+        imageUrl: item.imageUrl,
+        ...(item.subtitle ? { subtitle: item.subtitle } : {}),
+      })),
+      metadata:
+        from + ROW_PAGE < row.length
+          ? ({ page: page + 1 } satisfies KaynSearchMetadata)
+          : { completed: true },
     };
   }
 

@@ -215,13 +215,19 @@ export function toChapters(rows: ApiChapter[], sourceManga: SourceManga): Chapte
   return chapters;
 }
 
-/** A row of the home screen, cut from the catalogue reply. */
+/** A card as a row shows it. Rows are kept ready-made so the whole catalogue
+ * need not be held in state just to slice it. */
+export type RowItem = { mangaId: string; title: string; imageUrl: string; subtitle?: string };
+export type ReleaseItem = RowItem & { chapterId: string };
+
 export type HomeRows = {
-  popular: ApiSeries[];
-  mostPopular: ApiSeries[];
-  latest: ApiSeries[];
-  novels: ApiSeries[];
-  releases: { series: ApiSeries; chapterId: string; number: number; at: number }[];
+  popular: RowItem[];
+  fresh: RowItem[];
+  completed: RowItem[];
+  mostPopular: RowItem[];
+  latest: RowItem[];
+  novels: RowItem[];
+  releases: ReleaseItem[];
   genres: { id: string; title: string }[];
 };
 
@@ -231,14 +237,40 @@ function addedAt(series: ApiSeries): number {
   return Number.isFinite(time) ? time : 0;
 }
 
+function toRow(list: ApiSeries[], cap: number): RowItem[] {
+  const items: RowItem[] = [];
+
+  for (const series of list) {
+    const result = toSearchResult(series);
+
+    if (!result) {
+      continue;
+    }
+
+    const subtitle = seriesSubtitle(series);
+    items.push({
+      mangaId: result.mangaId,
+      title: result.title,
+      imageUrl: result.imageUrl,
+      ...(subtitle ? { subtitle } : {}),
+    });
+
+    if (items.length >= cap) {
+      break;
+    }
+  }
+
+  return items;
+}
+
 /**
  * The home screen's rows, cut from the single reply the site's own front page
  * asks for.
  *
- * Each row is the site's own idea of itself: what it marks as hot today, what
- * is rated highest, what has just had a chapter posted, and the novels it keeps
- * in a list of their own. The genres are the ones actually worn by something
- * here, so every one of them leads somewhere.
+ * Each is the site's own idea of itself: what it marks hot today, what it calls
+ * new, what has finished, what is rated highest, what has just had a chapter
+ * posted, and the novels it keeps in a list of their own. The genres are the
+ * ones actually worn by something here, so every one leads somewhere.
  */
 export function toHomeRows(payload: ApiPosts, cap: number): HomeRows {
   const posts = (payload.posts ?? []).filter((series) => (series.slug ?? "").trim().length > 0);
@@ -249,27 +281,44 @@ export function toHomeRows(payload: ApiPosts, cap: number): HomeRows {
   );
   const recent = [...posts].sort((left, right) => addedAt(right) - addedAt(left));
 
-  const releases: HomeRows["releases"] = [];
-  for (const series of posts) {
-    for (const chapter of (series.chapters ?? []) as ApiRecentChapter[]) {
-      const chapterId = chapter.id === undefined ? "" : String(chapter.id);
-
+  const releases: ReleaseItem[] = [];
+  const pending = [...posts]
+    .flatMap((series) =>
+      ((series.chapters ?? []) as ApiRecentChapter[]).map((chapter) => ({ series, chapter })),
+    )
+    .filter(({ chapter }) => {
       // A chapter still behind a timer or a price cannot be opened, so it is
       // not offered as something just released.
-      if (!chapterId || chapter.isLocked === true || chapter.isAccessible === false) {
-        continue;
-      }
+      return (
+        chapter.id !== undefined && chapter.isLocked !== true && chapter.isAccessible !== false
+      );
+    })
+    .sort((left, right) => {
+      const at = (value: ApiRecentChapter) =>
+        value.createdAt ? new Date(value.createdAt).getTime() || 0 : 0;
+      return at(right.chapter) - at(left.chapter);
+    });
 
-      const at = chapter.createdAt ? new Date(chapter.createdAt).getTime() : 0;
-      releases.push({
-        series,
-        chapterId,
-        number: Number(chapter.number) || 0,
-        at: Number.isFinite(at) ? at : 0,
-      });
+  for (const { series, chapter } of pending) {
+    const result = toSearchResult(series);
+
+    if (!result) {
+      continue;
+    }
+
+    const number = Number(chapter.number);
+    releases.push({
+      mangaId: result.mangaId,
+      chapterId: String(chapter.id),
+      title: result.title,
+      imageUrl: result.imageUrl,
+      ...(Number.isFinite(number) && number > 0 ? { subtitle: `Chapter ${number}` } : {}),
+    });
+
+    if (releases.length >= cap) {
+      break;
     }
   }
-  releases.sort((left, right) => right.at - left.at);
 
   const genres = new Map<string, string>();
   for (const series of [...posts, ...novels]) {
@@ -280,12 +329,26 @@ export function toHomeRows(payload: ApiPosts, cap: number): HomeRows {
     }
   }
 
+  const statusIs = (series: ApiSeries, value: string) =>
+    (series.seriesStatus ?? "").toUpperCase() === value;
+
   return {
-    popular: posts.filter((series) => series.hot === true).slice(0, cap),
-    mostPopular: rated.slice(0, cap),
-    latest: recent.slice(0, cap),
-    novels: novels.slice(0, cap),
-    releases: releases.slice(0, cap),
+    popular: toRow(
+      posts.filter((series) => series.hot === true),
+      cap,
+    ),
+    fresh: toRow(
+      posts.filter((series) => series.isNew === true),
+      cap,
+    ),
+    completed: toRow(
+      posts.filter((series) => statusIs(series, "COMPLETED")),
+      cap,
+    ),
+    mostPopular: toRow(rated, cap),
+    latest: toRow(recent, cap),
+    novels: toRow(novels, cap),
+    releases,
     genres: [...genres.entries()]
       .map(([id, title]) => ({ id, title }))
       .sort((left, right) => left.title.localeCompare(right.title)),
