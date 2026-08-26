@@ -16,6 +16,7 @@ import {
   seriesPageUrl,
   toId,
   type ApiChapter,
+  type ApiChapterDetail,
   type ApiSeries,
 } from "./models";
 
@@ -120,12 +121,6 @@ export function toSearchResult(series: ApiSeries): SearchResultItem | undefined 
     return undefined;
   }
 
-  // Novels are text, not pages; the reader has nothing to show for them, so
-  // they are left out rather than offered and then found unreadable.
-  if ((series.seriesType ?? "").toUpperCase() === "NOVEL") {
-    return undefined;
-  }
-
   const mangaId = toId(slug);
 
   const subtitle = seriesSubtitle(series);
@@ -151,11 +146,11 @@ function statusOf(raw: string | null | undefined): string {
  * printed with its tags showing.
  */
 export function toSourceManga($: CheerioAPI, series: ApiSeries, mangaId: string): SourceManga {
+  const type = (series.seriesType ?? "").trim();
   const tags = genreTags(series);
   const tagGroups: TagSection[] = tags.length ? [{ id: "genres", title: "Genres", tags }] : [];
 
   const synopsis = series.postContent ? $(`<div>${series.postContent}</div>`).text().trim() : "";
-  const type = (series.seriesType ?? "").trim();
 
   return {
     mangaId,
@@ -165,6 +160,9 @@ export function toSourceManga($: CheerioAPI, series: ApiSeries, mangaId: string)
       thumbnailUrl: usable(series.featuredImage),
       synopsis,
       contentRating: ContentRating.MATURE,
+      // The app reads a novel differently from a comic, so it is told which
+      // this is rather than being left to find out at the first chapter.
+      contentType: type.toUpperCase() === "NOVEL" ? "novel" : "comic",
       status: statusOf(series.seriesStatus),
       shareUrl: seriesPageUrl(mangaId),
       ...(typeof series.averageRating === "number" && series.averageRating > 0
@@ -187,13 +185,12 @@ export function toChapters(rows: ApiChapter[], sourceManga: SourceManga): Chapte
   const chapters: Chapter[] = [];
 
   for (const row of rows) {
-    const slug = (row.slug ?? "").trim();
+    // The chapter route is addressed by id, and an id is always safe to carry.
+    const chapterId = row.id === undefined ? "" : String(row.id);
 
-    if (!slug) {
+    if (!chapterId) {
       continue;
     }
-
-    const chapterId = toId(slug);
 
     if (row.isLocked === true || row.isAccessible === false) {
       continue;
@@ -216,25 +213,23 @@ export function toChapters(rows: ApiChapter[], sourceManga: SourceManga): Chapte
   return chapters;
 }
 
+/** A comic chapter's pages, in the order the site gives them. */
+export function toPages(detail: ApiChapterDetail): string[] {
+  return [...(detail.images ?? [])]
+    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0))
+    .map((image) => usable(image.url))
+    .filter((url) => !url.endsWith("/_no-cover.png"));
+}
+
 /**
- * A chapter's pages.
+ * A novel chapter's text.
  *
- * The reader builds itself with script, but the page lists every image in its
- * own structured data first, in reading order - which is both the complete list
- * and the one that can be read without running anything.
+ * It arrives as the site's own markup, which the app renders, so it is passed
+ * through - short of anything that would run rather than be read.
  */
-export function parsePages($: CheerioAPI): string[] {
-  const pages: string[] = [];
-
-  $('[itemprop="articleBody"] meta[itemprop="image"]').each((_, element) => {
-    const source = ($(element).attr("content") ?? "").trim();
-
-    if (/^https?:\/\/[^/\s]+\.[^/\s]+\/\S/.test(source)) {
-      pages.push(
-        source.startsWith("http://") ? `https://${source.slice("http://".length)}` : source,
-      );
-    }
-  });
-
-  return pages;
+export function toNovelHtml(detail: ApiChapterDetail): string {
+  return (detail.content ?? "")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, "")
+    .trim();
 }

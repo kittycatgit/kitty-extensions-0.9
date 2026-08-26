@@ -62,6 +62,14 @@ export type ApiChapter = {
 
 export type ApiGenre = { id?: number; name?: string };
 
+/** A chapter as its own route returns it: images for a comic, text for a novel. */
+export type ApiChapterDetail = {
+  content?: string | null;
+  images?: { url?: string | null; order?: number | null }[] | null;
+  isAccessible?: boolean;
+  isLocked?: boolean;
+};
+
 /**
  * Ids the app will accept.
  *
@@ -100,6 +108,17 @@ export function seriesPageUrl(slug: string): string {
 
 export function chapterPageUrl(seriesSlug: string, chapterSlug: string): string {
   return `${DOMAIN}/series/${seriesSlug}/${chapterSlug}`;
+}
+
+/**
+ * A chapter, whole.
+ *
+ * One route hands back both kinds: a comic arrives as an ordered list of
+ * images, a novel as its text. It also says whether the chapter is one the
+ * reader may open at all, which the listing only hints at.
+ */
+export function chapterApiUrl(chapterId: string): string {
+  return `${API}/chapter?chapterId=${encodeURIComponent(chapterId)}`;
 }
 
 export const POPULAR_SECTION_ID = "popular";

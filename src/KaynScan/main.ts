@@ -33,16 +33,24 @@ import {
   POPULAR_ORDER,
   POPULAR_SECTION_ID,
   SORTS,
-  chapterPageUrl,
+  chapterApiUrl,
   fromId,
   type ApiChapter,
+  type ApiChapterDetail,
   type ApiGenre,
   type ApiListing,
   type ApiSeries,
   type KaynSearchMetadata,
 } from "./models";
 import { KaynScanInterceptor } from "./network";
-import { parsePages, seriesSubtitle, toChapters, toSearchResult, toSourceManga } from "./parsers";
+import {
+  seriesSubtitle,
+  toChapters,
+  toNovelHtml,
+  toPages,
+  toSearchResult,
+  toSourceManga,
+} from "./parsers";
 import type pbconfigType from "./pbconfig";
 
 class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
@@ -175,19 +183,41 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
     return toChapters(rows, sourceManga);
   }
 
+  /**
+   * A chapter, whichever kind it is.
+   *
+   * One route answers for both: a comic comes back as an ordered list of
+   * images, a novel as its text, and the same reply says whether the reader is
+   * allowed it at all.
+   */
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
-    const $ = await this.html(
-      chapterPageUrl(fromId(chapter.sourceManga.mangaId), fromId(chapter.chapterId)),
+    const mangaId = chapter.sourceManga.mangaId;
+    const data = await this.json<{ chapter?: ApiChapterDetail } & ApiChapterDetail>(
+      chapterApiUrl(chapter.chapterId),
     );
-    const pages = parsePages($);
+    const detail = data.chapter ?? data;
 
-    if (pages.length === 0) {
+    if (detail.isLocked === true || detail.isAccessible === false) {
       throw new Error(
-        `Chapter ${chapter.chapterId} has no pages to show. It may be locked, or the site may still be preparing it.`,
+        "This chapter is still locked on the site - it unlocks on a timer, or with coins.",
       );
     }
 
-    return { id: chapter.chapterId, mangaId: chapter.sourceManga.mangaId, pages };
+    const pages = toPages(detail);
+
+    if (pages.length > 0) {
+      return { id: chapter.chapterId, mangaId, pages };
+    }
+
+    const html = toNovelHtml(detail);
+
+    if (html.length > 0) {
+      return { id: chapter.chapterId, mangaId, type: "html", html };
+    }
+
+    throw new Error(
+      `Chapter ${chapter.chapterId} has nothing to show yet. The site may still be preparing it.`,
+    );
   }
 
   async getSearchTags() {
