@@ -219,7 +219,7 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     // The site's answer sets the pace for next time: refused, and the gap
     // widens a step; clean, and it narrows. Nothing here is a guess about what
     // the limit is - only which way to lean after what just happened.
-    this.adjustGap((outcome.r429 ?? 0) > 0);
+    this.adjustGap((outcome.r429 ?? 0) > 0 || outcome.cf === true);
 
     const pages: string[] = [];
 
@@ -298,18 +298,13 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
       const parsed = JSON.parse(String(outcome.result)) as WebViewChapterOutcome;
 
       if (parsed.cf) {
-        // Bot verification, not a rate limit. Say so properly: this is the one
-        // failure the reader can actually clear, and reporting it as anything
-        // else leaves them retrying a chapter that will not open until they do.
-        console.log(`[OniSaga] bot verification while minting chapter ${chapterId}`);
-        throw new CloudflareError(
-          {
-            url: DOMAIN,
-            method: "GET",
-            headers: { referer: `${DOMAIN}/`, "user-agent": USER_AGENT },
-          },
-          "Bot verification detected, bypass it to continue!",
-        );
+        // A challenge on the page API is the site throttling, not something the
+        // reader can clear: there is one of these per page, and putting a
+        // verification in front of each would bury them. It is treated as a
+        // refusal, and the pace backs off. A genuine site-wide challenge still
+        // reaches them through the chapter page, which the app fetches itself
+        // on every open and which does raise the prompt, once.
+        console.log(`[OniSaga] page API challenged while minting chapter ${chapterId}`);
       }
 
       return parsed;
