@@ -85,7 +85,7 @@ export const WEBVIEW_BUDGET_MS = 26_000;
  * signed addresses live ~10 minutes from MINTING - the cache stamps entries
  * with when resolution started, and this window leaves a cache hit at the very
  * edge still holding several minutes of signature life for the read. */
-export const CHAPTER_CACHE_TTL_MS = 4 * 60_000;
+export const CHAPTER_CACHE_TTL_MS = 8 * 60_000;
 
 /** How many resolved chapters are kept at once. Each entry is a page-URL list
  * a few tens of KB large, so the cache trims itself to the newest few rather

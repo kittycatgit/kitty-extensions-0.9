@@ -52,6 +52,21 @@ const SNAPSHOT_PAGE = "/top-manga";
 /** Browsing with no query: the lightest route that paginates. */
 const BROWSE_PATH = "/top-manga";
 
+/**
+ * Ordered chapter lists, so the chapter after this one can be made ready while
+ * this one is being read. Only the few series in use are held.
+ */
+const CHAPTER_ORDER_INDEX_KEY = "onisaga.order.index";
+const CHAPTER_ORDER_MAX = 3;
+
+function chapterOrderKey(mangaId: string): string {
+  return `onisaga.order.${mangaId}`;
+}
+
+/** Set while a chapter is being made ready in the background, so a second one
+ * is never started on top of it. */
+let readyingAhead = false;
+
 // Only ONE WebView pool may run at a time. Two overlapping pools double the
 // mint rate against the site's burst limit, so every resolution queues through
 // this single tail - the native WebView cannot be stopped once it starts, so
@@ -123,9 +138,40 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     return parseMangaDetails($, mangaId);
   }
 
+  /** Chapters in reading order, kept so the next one can be made ready while
+   * the current one is being read. Only the few series in use are held. */
+  private rememberOrder(mangaId: string, chapters: Chapter[]): void {
+    const order = chapters
+      .map((c) => ({ id: c.chapterId, num: c.chapNum }))
+      .sort((a, b) => a.num - b.num);
+
+    if (order.length === 0) {
+      return;
+    }
+
+    Application.setState(order, chapterOrderKey(mangaId));
+
+    const index = (
+      (Application.getState(CHAPTER_ORDER_INDEX_KEY) as string[] | undefined) ?? []
+    ).filter((id) => id !== mangaId);
+    index.push(mangaId);
+
+    while (index.length > CHAPTER_ORDER_MAX) {
+      const oldest = index.shift();
+
+      if (oldest !== undefined) {
+        Application.setState(undefined, chapterOrderKey(oldest));
+      }
+    }
+
+    Application.setState(index, CHAPTER_ORDER_INDEX_KEY);
+  }
+
   async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
     const $ = await this.fetch(`/manga/${sourceManga.mangaId}`);
     const chapters = parseChapters($, sourceManga);
+
+    this.rememberOrder(sourceManga.mangaId, chapters);
 
     return chapters;
   }
@@ -153,6 +199,11 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
 
     if (cached && Date.now() - cached.at < CHAPTER_CACHE_TTL_MS) {
       console.log(`[OniSaga] chapter ${chapterId} served from cache (${cached.urls.length} pages)`);
+
+      // Keep the chain going: this one cost nothing, so the one after it can be
+      // got ready now rather than being waited for at the next boundary.
+      this.readyNextChapter(mangaId, chapterId);
+
       return { id: chapterId, mangaId, pages: cached.urls };
     }
 
@@ -160,6 +211,28 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
       Application.setState(undefined, chapterCacheKey(chapterId));
     }
 
+    const pages = await this.resolveChapter(mangaId, chapterId, chapter.additionalInfo?.pages);
+
+    // With this chapter in hand, get the next one ready while it is being read.
+    // Paperback asks for every address before it will open a chapter, and the
+    // site hands them over one at a time, so the wait at a chapter boundary
+    // cannot be made short - it can only be moved somewhere the reader is not
+    // sitting watching it.
+    this.readyNextChapter(mangaId, chapterId);
+
+    return { id: chapterId, mangaId, pages };
+  }
+
+  /**
+   * Every page address for a chapter: its own page for the token and length,
+   * then one pass in the WebView to mint them. Throws with something the reader
+   * can act on if the site will not hand them all over.
+   */
+  private async resolveChapter(
+    mangaId: string,
+    chapterId: string,
+    declaredPages?: string,
+  ): Promise<string[]> {
     const url = readerUrl(mangaId, chapterId);
     const [, buffer] = await Application.scheduleRequest({ url, method: "GET" });
     const html = Application.arrayBufferToUTF8String(buffer);
@@ -180,7 +253,7 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
       html.match(/['"]?(?:pageCount|totalPages|pages_count)['"]?\s*:\s*(\d+)/)?.[1] ??
         html.match(/(\d+)\s*pages\b/i)?.[1] ??
         html.match(/data-pages=['"](\d+)['"]/)?.[1] ??
-        chapter.additionalInfo?.pages ??
+        declaredPages ??
         0,
     );
 
@@ -247,7 +320,60 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     // ten-minute signatures started to tick.
     this.cacheChapter(chapterId, pages, Date.now() - (outcome.ms ?? 0));
 
-    return { id: chapterId, mangaId, pages };
+    return pages;
+  }
+
+  /**
+   * Mints the chapter after this one while this one is being read.
+   *
+   * Deliberately not awaited: the reader has what it asked for and should not
+   * wait on this. It runs through the same single gate as an open, so the two
+   * never mint at once - and if the reader gets there first, they simply wait
+   * out the pass already in flight and then find it done. Left alone if the
+   * site has just pushed back, since the next chapter is not worth spending a
+   * refusal on.
+   */
+  private readyNextChapter(mangaId: string, chapterId: string): void {
+    if (readyingAhead || this.currentGap() > 0) {
+      return;
+    }
+
+    const order = Application.getState(chapterOrderKey(mangaId)) as
+      | { id: string; num: number }[]
+      | undefined;
+
+    if (!order?.length) {
+      return;
+    }
+
+    const here = order.findIndex((c) => c.id === chapterId);
+    const next = here >= 0 ? order[here + 1] : undefined;
+
+    if (!next) {
+      return;
+    }
+
+    const held = Application.getState(chapterCacheKey(next.id)) as
+      | { urls: string[]; at: number }
+      | undefined;
+
+    if (held && Date.now() - held.at < CHAPTER_CACHE_TTL_MS) {
+      return;
+    }
+
+    readyingAhead = true;
+
+    // Floating on purpose - the read carries on while this happens behind it.
+    void this.resolveChapter(mangaId, next.id)
+      .then((pages) => {
+        console.log(`[OniSaga] chapter ${next.id} made ready ahead (${pages.length} pages)`);
+      })
+      .catch(() => {
+        // Best effort: it simply opens the ordinary way when reached.
+      })
+      .then(() => {
+        readyingAhead = false;
+      });
   }
 
   /**
