@@ -43,8 +43,9 @@ function imageFrom(element: Cheerio<Element>): string | undefined {
     element.attr("data-lazy-src"),
     element.attr("data-cfsrc"),
     element.attr("data-original"),
-    element.attr("srcset")?.split(",")[0]?.trim().split(" ")[0],
     element.attr("src"),
+    // Last, and only as a rescue: its first entry is a scaled-down variant.
+    element.attr("srcset")?.split(",")[0]?.trim().split(" ")[0],
   ];
 
   for (const candidate of candidates) {
@@ -57,6 +58,35 @@ function imageFrom(element: Cheerio<Element>): string | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * The first candidate that resolves to an address worth handing over.
+ *
+ * A series page can carry an og:image that is simply broken - `https:/` with
+ * one slash and no host at all, on this site - and a value that starts with
+ * `http` was being taken at its word, so the app was handed something it could
+ * not fetch and the series showed no cover while its own thumbnail was fine.
+ * Each candidate is resolved and checked for a scheme and a host before it is
+ * accepted, and a series with nothing usable ends at a real address that holds
+ * no image rather than an empty one, which is rejected outright.
+ */
+function firstUsableImage(domain: string, candidates: (string | undefined)[]): string {
+  for (const candidate of candidates) {
+    const value = candidate?.trim();
+
+    if (!value || value.startsWith("data:")) {
+      continue;
+    }
+
+    const resolved = absolute(domain, value);
+
+    if (/^https?:\/\/[^/\s]+\.[^/\s]+\/\S/.test(resolved)) {
+      return resolved;
+    }
+  }
+
+  return `${domain}/_no-cover.png`;
 }
 
 function absolute(domain: string, src: string | undefined): string {
@@ -90,7 +120,7 @@ export function parseListing($: CheerioAPI, domain: string): SearchResultItem[] 
     items.push({
       mangaId,
       title: title || mangaId,
-      imageUrl: absolute(domain, imageFrom(image)) || `${domain}/_no-cover.png`,
+      imageUrl: firstUsableImage(domain, [imageFrom(image)]),
       ...(subtitle ? { subtitle } : {}),
     });
   }
@@ -187,13 +217,11 @@ export function parseMangaDetails($: CheerioAPI, mangaId: string, domain: string
       // A cover that comes back empty is rejected outright, so this ends at a
       // real address that simply holds no image and lets the app draw its own
       // placeholder, rather than handing back nothing.
-      thumbnailUrl:
-        absolute(
-          domain,
-          $("meta[property='og:image']").attr("content")?.trim() ||
-            imageFrom($("#mangaSummary img").first()) ||
-            imageFrom($(".manga-poster img, .summary_image img, .thumb img").first()),
-        ) || `${domain}/_no-cover.png`,
+      thumbnailUrl: firstUsableImage(domain, [
+        imageFrom($("#mangaSummary img").first()),
+        $("meta[property='og:image']").attr("content"),
+        imageFrom($(".manga-poster img, .summary_image img, .thumb img").first()),
+      ]),
       synopsis,
       contentRating: ContentRating.MATURE,
       shareUrl: `${domain}/manhwa/${mangaId}/`,
