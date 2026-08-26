@@ -62,6 +62,37 @@ export type ApiChapter = {
 
 export type ApiGenre = { id?: number; name?: string };
 
+/**
+ * Ids the app will accept.
+ *
+ * Anything crossing the bridge must be alphanumeric or drawn from
+ * `._-@()[]%?#+=/&:`, and some of this site's slugs carry an apostrophe. One
+ * such id is not rejected on its own - a row's items are converted together, so
+ * a single bad slug takes the whole row down with it. Percent is a permitted
+ * character, so the offending ones are escaped on the way out and unescaped
+ * again whenever an address is built from them.
+ */
+const ID_UNSAFE = /[^A-Za-z0-9._\-@()[\]%?#+=/&:]/g;
+
+export function toId(slug: string): string {
+  return slug.replace(ID_UNSAFE, (character) => {
+    const escaped = encodeURIComponent(character);
+
+    // encodeURIComponent leaves a few marks - an apostrophe among them - alone.
+    return escaped === character
+      ? `%${character.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`
+      : escaped;
+  });
+}
+
+export function fromId(id: string): string {
+  try {
+    return decodeURIComponent(id);
+  } catch {
+    return id;
+  }
+}
+
 /** Series pages carry the slug; chapter pages hang off it. */
 export function seriesPageUrl(slug: string): string {
   return `${DOMAIN}/series/${slug}`;

@@ -10,7 +10,14 @@ import {
 } from "@paperback/types";
 import type { CheerioAPI } from "cheerio";
 
-import { DOMAIN, FALLBACK_COVER, seriesPageUrl, type ApiChapter, type ApiSeries } from "./models";
+import {
+  DOMAIN,
+  FALLBACK_COVER,
+  seriesPageUrl,
+  toId,
+  type ApiChapter,
+  type ApiSeries,
+} from "./models";
 
 /**
  * An address only counts if it has a scheme and a host to fetch from.
@@ -61,6 +68,17 @@ export function seriesSubtitle(series: ApiSeries): string | undefined {
     bits.push(status.charAt(0) + status.slice(1).toLowerCase());
   }
 
+  // The listing already carries the most recent chapters, so the newest one a
+  // reader can actually open is free to show and is what they look for first.
+  const latest = (series.chapters ?? [])
+    .filter((chapter) => chapter.isLocked !== true && chapter.isAccessible !== false)
+    .map((chapter) => Number(chapter.number))
+    .filter((number) => Number.isFinite(number));
+
+  if (latest.length > 0) {
+    bits.push(`Ch. ${Math.max(...latest)}`);
+  }
+
   if (typeof series.averageRating === "number" && series.averageRating > 0) {
     bits.push(`${series.averageRating.toFixed(1)}/10`);
   }
@@ -69,12 +87,20 @@ export function seriesSubtitle(series: ApiSeries): string | undefined {
 }
 
 export function toSearchResult(series: ApiSeries): SearchResultItem | undefined {
-  const mangaId = (series.slug ?? "").trim();
+  const slug = (series.slug ?? "").trim();
   const title = (series.postTitle ?? "").trim();
 
-  if (!mangaId || !title) {
+  if (!slug || !title) {
     return undefined;
   }
+
+  // Novels are text, not pages; the reader has nothing to show for them, so
+  // they are left out rather than offered and then found unreadable.
+  if ((series.seriesType ?? "").toUpperCase() === "NOVEL") {
+    return undefined;
+  }
+
+  const mangaId = toId(slug);
 
   const subtitle = seriesSubtitle(series);
 
@@ -143,11 +169,13 @@ export function toChapters(rows: ApiChapter[], sourceManga: SourceManga): Chapte
   const chapters: Chapter[] = [];
 
   for (const row of rows) {
-    const chapterId = (row.slug ?? "").trim();
+    const slug = (row.slug ?? "").trim();
 
-    if (!chapterId) {
+    if (!slug) {
       continue;
     }
+
+    const chapterId = toId(slug);
 
     if (row.isLocked === true || row.isAccessible === false) {
       continue;

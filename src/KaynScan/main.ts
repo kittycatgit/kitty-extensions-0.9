@@ -34,6 +34,7 @@ import {
   POPULAR_SECTION_ID,
   SORTS,
   chapterPageUrl,
+  fromId,
   type ApiChapter,
   type ApiGenre,
   type ApiListing,
@@ -133,7 +134,7 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
 
   async getMangaDetails(mangaId: string): Promise<SourceManga> {
     const data = await this.json<{ post?: ApiSeries }>(
-      `${API}/post?postSlug=${encodeURIComponent(mangaId)}`,
+      `${API}/post?postSlug=${encodeURIComponent(fromId(mangaId))}`,
     );
     const post = data.post;
 
@@ -146,7 +147,7 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
 
   async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
     const details = await this.json<{ post?: ApiSeries }>(
-      `${API}/post?postSlug=${encodeURIComponent(sourceManga.mangaId)}`,
+      `${API}/post?postSlug=${encodeURIComponent(fromId(sourceManga.mangaId))}`,
     );
     const postId = details.post?.id;
 
@@ -175,7 +176,9 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
   }
 
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
-    const $ = await this.html(chapterPageUrl(chapter.sourceManga.mangaId, chapter.chapterId));
+    const $ = await this.html(
+      chapterPageUrl(fromId(chapter.sourceManga.mangaId), fromId(chapter.chapterId)),
+    );
     const pages = parsePages($);
 
     if (pages.length === 0) {
