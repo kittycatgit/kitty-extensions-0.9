@@ -9,6 +9,7 @@ import {
   type TagSection,
 } from "@paperback/types";
 import type { CheerioAPI } from "cheerio";
+import type { AnyNode, Element, Text } from "domhandler";
 
 import {
   DOMAIN,
@@ -20,6 +21,7 @@ import {
   type ApiPosts,
   type ApiRecentChapter,
   type ApiSeries,
+  type GenreChoice,
 } from "./models";
 
 /**
@@ -220,6 +222,23 @@ export function toChapters(rows: ApiChapter[], sourceManga: SourceManga): Chapte
 export type RowItem = { mangaId: string; title: string; imageUrl: string; subtitle?: string };
 export type ReleaseItem = RowItem & { chapterId: string };
 
+/**
+ * How a genre is written, out of the several ways the site writes it.
+ *
+ * A name that varies only in case is the same genre said differently, so the
+ * one that reads properly is preferred over the shouted or the whispered
+ * version, and a genre the site only ever writes in one case is given capitals
+ * so it does not sit oddly beside the rest.
+ */
+function displayName(group: { name: string; worn: number }[]): string {
+  const mixed = group.filter((entry) => /[a-z]/.test(entry.name) && /[A-Z]/.test(entry.name));
+  const best = [...(mixed.length ? mixed : group)].sort(
+    (left, right) => right.worn - left.worn || left.name.localeCompare(right.name),
+  )[0]!.name;
+
+  return /[A-Z]/.test(best) ? best : best.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}
+
 export type HomeRows = {
   popular: RowItem[];
   fresh: RowItem[];
@@ -228,7 +247,7 @@ export type HomeRows = {
   latest: RowItem[];
   novels: RowItem[];
   releases: ReleaseItem[];
-  genres: { id: string; title: string }[];
+  genres: GenreChoice[];
 };
 
 function addedAt(series: ApiSeries): number {
@@ -270,7 +289,8 @@ function toRow(list: ApiSeries[], cap: number): RowItem[] {
  * Each is the site's own idea of itself: what it marks hot today, what it calls
  * new, what has finished, what is rated highest, what has just had a chapter
  * posted, and the novels it keeps in a list of their own. The genres are the
- * ones actually worn by something here, so every one leads somewhere.
+ * ones actually worn by something here, most-used first, so every one leads
+ * somewhere and the ones worth tapping come first.
  */
 export function toHomeRows(payload: ApiPosts, cap: number): HomeRows {
   const posts = (payload.posts ?? []).filter((series) => (series.slug ?? "").trim().length > 0);
@@ -299,12 +319,21 @@ export function toHomeRows(payload: ApiPosts, cap: number): HomeRows {
       return at(right.chapter) - at(left.chapter);
     });
 
+  // A series that posted three chapters this morning is still one thing to
+  // look at, and three of the same cover in a row reads as a fault rather than
+  // as news. Each series appears once, at its newest chapter; the row then
+  // carries what is new across the whole site instead of repeating its busiest
+  // few titles.
+  const already = new Set<string>();
+
   for (const { series, chapter } of pending) {
     const result = toSearchResult(series);
 
-    if (!result) {
+    if (!result || already.has(result.mangaId)) {
       continue;
     }
+
+    already.add(result.mangaId);
 
     const number = Number(chapter.number);
     releases.push({
@@ -320,12 +349,42 @@ export function toHomeRows(payload: ApiPosts, cap: number): HomeRows {
     }
   }
 
-  const genres = new Map<string, string>();
+  // A genre in the row is a question put to the search endpoint, and that
+  // endpoint only answers to the site's own numeric ids. A genre that arrived
+  // as a bare name has no such id and could only lead to an empty shelf, so it
+  // is left out of the row - it still shows on a series, where it is only a
+  // label. The site lists far more genres than it has tagged anything with;
+  // these are the ones something actually wears.
+  //
+  // The site also carries the same genre more than once - "drama", "Drama" and
+  // "DRAMA" are three separate ids, holding different titles between them.
+  // Showing all three would be nonsense, and picking one would hide the rest,
+  // so they are gathered into a single entry that asks about every id it stands
+  // for; the endpoint takes them together and answers with the union.
+  const variants = new Map<string, { id: string; name: string; worn: number }[]>();
   for (const series of [...posts, ...novels]) {
-    for (const tag of genreTags(series)) {
-      if (!genres.has(tag.id)) {
-        genres.set(tag.id, tag.title);
+    for (const genre of series.genres ?? []) {
+      if (typeof genre === "string" || genre?.id === undefined) {
+        continue;
       }
+
+      const name = (genre.name ?? "").trim();
+
+      if (!name) {
+        continue;
+      }
+
+      const id = String(genre.id);
+      const group = variants.get(name.toLowerCase()) ?? [];
+      const seen = group.find((entry) => entry.id === id);
+
+      if (seen) {
+        seen.worn += 1;
+      } else {
+        group.push({ id, name, worn: 1 });
+      }
+
+      variants.set(name.toLowerCase(), group);
     }
   }
 
@@ -349,9 +408,16 @@ export function toHomeRows(payload: ApiPosts, cap: number): HomeRows {
     latest: toRow(recent, cap),
     novels: toRow(novels, cap),
     releases,
-    genres: [...genres.entries()]
-      .map(([id, title]) => ({ id, title }))
-      .sort((left, right) => left.title.localeCompare(right.title)),
+    // The genres a reader is looking for are the ones the site tags most; an
+    // alphabetical row leads with whatever oddity starts with a digit.
+    genres: [...variants.values()]
+      .map((group) => ({
+        ids: [...group].sort((left, right) => right.worn - left.worn).map((entry) => entry.id),
+        title: displayName(group),
+        worn: group.reduce((total, entry) => total + entry.worn, 0),
+      }))
+      .sort((left, right) => right.worn - left.worn || left.title.localeCompare(right.title))
+      .map(({ ids, title }) => ({ ids, title })),
   };
 }
 
@@ -364,14 +430,138 @@ export function toPages(detail: ApiChapterDetail): string[] {
 }
 
 /**
- * A novel chapter's text.
+ * Elements a chapter of prose has any business containing.
  *
- * It arrives as the site's own markup, which the app renders, so it is passed
- * through - short of anything that would run rather than be read.
+ * Anything else the site's editor left behind - a stray widget, a share button,
+ * an advert - is dropped, while its text is kept, so the chapter reads as a
+ * chapter.
  */
-export function toNovelHtml(detail: ApiChapterDetail): string {
-  return (detail.content ?? "")
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, "")
-    .trim();
+const NOVEL_ELEMENTS = new Set([
+  "p",
+  "br",
+  "hr",
+  "em",
+  "strong",
+  "i",
+  "b",
+  "u",
+  "s",
+  "small",
+  "sup",
+  "sub",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "blockquote",
+  "pre",
+  "code",
+  "ul",
+  "ol",
+  "li",
+  "dl",
+  "dt",
+  "dd",
+  "div",
+  "span",
+  "a",
+  "img",
+  "figure",
+  "figcaption",
+  "table",
+  "thead",
+  "tbody",
+  "tfoot",
+  "tr",
+  "td",
+  "th",
+]);
+
+/** Elements written without a closing tag, which XHTML wants closed anyway. */
+const NOVEL_VOID_ELEMENTS = new Set(["br", "hr", "img"]);
+
+/** Attributes worth keeping; the rest are markup the reader cannot act on. */
+const NOVEL_ATTRIBUTES = new Set(["href", "src", "alt", "title"]);
+
+function escapeText(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function escapeAttribute(value: string): string {
+  return escapeText(value).replace(/"/g, "&quot;");
+}
+
+/**
+ * Writes a parsed chapter back out as XHTML.
+ *
+ * The reader parses a chapter as XML, which is stricter than the markup a web
+ * page gets away with: every element must be closed, and the document must have
+ * a single root. The site writes `<br>` between its lines, which is perfectly
+ * good HTML and fatal here - it ends the chapter at the first line with the
+ * parser's own error where the text should be. Reading the markup properly and
+ * writing it back out closed is what makes it survive that.
+ */
+function toXhtml(nodes: AnyNode[]): string {
+  let out = "";
+
+  for (const node of nodes) {
+    if (node.type === "text") {
+      out += escapeText((node as Text).data ?? "");
+      continue;
+    }
+
+    if (node.type !== "tag" && node.type !== "script" && node.type !== "style") {
+      continue;
+    }
+
+    const element = node as Element;
+    const name = (element.name ?? "").toLowerCase();
+    const children = (element.children ?? []) as AnyNode[];
+
+    if (!NOVEL_ELEMENTS.has(name)) {
+      // Not something a chapter should carry - but the words inside it may be.
+      out += name === "script" || name === "style" ? "" : toXhtml(children);
+      continue;
+    }
+
+    const attributes = Object.entries(element.attribs ?? {})
+      .filter(
+        ([key, value]) =>
+          NOVEL_ATTRIBUTES.has(key.toLowerCase()) && typeof value === "string" && value.length > 0,
+      )
+      .map(([key, value]) => ` ${key.toLowerCase()}="${escapeAttribute(String(value))}"`)
+      .join("");
+
+    if (NOVEL_VOID_ELEMENTS.has(name)) {
+      out += `<${name}${attributes}/>`;
+      continue;
+    }
+
+    out += `<${name}${attributes}>${toXhtml(children)}</${name}>`;
+  }
+
+  return out;
+}
+
+/**
+ * A novel chapter's text, as the reader can render it.
+ *
+ * The markup is read the forgiving way a browser reads a page - unclosed tags
+ * and all - and written back out the strict way the reader requires, under a
+ * single root element, since some chapters open with a line of bare text that
+ * would otherwise have nothing holding it.
+ */
+export function toNovelHtml($: CheerioAPI, detail: ApiChapterDetail): string {
+  const content = (detail.content ?? "").trim();
+
+  if (!content) {
+    return "";
+  }
+
+  const parsed = $(`<div>${content}</div>`);
+  const body = toXhtml(parsed.contents().toArray() as AnyNode[]).trim();
+
+  return body ? `<div>${body}</div>` : "";
 }

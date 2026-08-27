@@ -44,7 +44,7 @@ import {
   fromId,
   type ApiChapter,
   type ApiChapterDetail,
-  type ApiGenre,
+  type GenreChoice,
   type ApiListing,
   type ApiPosts,
   type ApiSeries,
@@ -120,8 +120,11 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
       parts.push(`seriesType=${encodeURIComponent(filters.type)}`);
     }
 
+    // The endpoint takes several ids at once, comma separated, and answers with
+    // everything wearing any of them - which is how one genre the site happens
+    // to file under three ids is asked about in a single question.
     if (filters.genreIds?.length) {
-      parts.push(`genreIds=${filters.genreIds[0]}`);
+      parts.push(`genreIds=${filters.genreIds.map((id) => encodeURIComponent(id)).join(",")}`);
     }
 
     return `${API}/query?${parts.join("&")}`;
@@ -157,9 +160,9 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
 
   /** The genres actually worn by something in the catalogue, so each one leads
    * somewhere. They come from the same reply the rows do. */
-  private async genres(): Promise<ApiGenre[]> {
+  private async genres(): Promise<GenreChoice[]> {
     const rows = await this.home();
-    return rows.genres.map((genre) => ({ id: Number(genre.id), name: genre.title }));
+    return rows.genres;
   }
 
   async getMangaDetails(mangaId: string): Promise<SourceManga> {
@@ -231,7 +234,7 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
       return { id: chapter.chapterId, mangaId, pages };
     }
 
-    const html = toNovelHtml(detail);
+    const html = toNovelHtml(cheerio.load("<div></div>"), detail);
 
     if (html.length > 0) {
       return { id: chapter.chapterId, mangaId, type: "html", html };
@@ -240,18 +243,6 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
     throw new Error(
       `Chapter ${chapter.chapterId} has nothing to show yet. The site may still be preparing it.`,
     );
-  }
-
-  async getSearchTags() {
-    const genres = await this.genres();
-
-    return [
-      {
-        id: "genres",
-        title: "Genres",
-        tags: genres.map((genre) => ({ id: String(genre.id), title: (genre.name ?? "").trim() })),
-      },
-    ];
   }
 
   async getAdvancedSearchForm(query: SearchQuery<Metadata>): Promise<KaynScanSearchForm> {
@@ -327,7 +318,7 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
         items: rows.genres.map((genre) => ({
           type: "genresCarouselItem" as const,
           name: genre.title,
-          searchQuery: { title: "", metadata: { genreIds: [genre.id] } as Metadata },
+          searchQuery: { title: "", metadata: { genreIds: genre.ids } as Metadata },
         })),
         metadata: { completed: true },
       };

@@ -65,6 +65,13 @@ export type ApiChapter = {
 
 export type ApiGenre = { id?: number; name?: string };
 
+/**
+ * A genre as it is offered to the reader: one name, and every id the site files
+ * it under. The search endpoint takes the ids together, separated by commas,
+ * and answers with everything wearing any of them.
+ */
+export type GenreChoice = { ids: string[]; title: string };
+
 /** The catalogue reply behind the home page: comics, novels, and their counts. */
 export type ApiPosts = {
   posts?: ApiSeries[];
@@ -213,8 +220,3 @@ export type KaynSearchMetadata = {
   type?: string;
   completed?: boolean;
 };
-
-/** Genres change as the site tags new titles, so they are fetched rather than
- * written down here, and kept only briefly. */
-export const GENRE_STATE_KEY = "kaynscan.genres";
-export const GENRE_TTL_MS = 12 * 60 * 60_000;

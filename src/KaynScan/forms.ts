@@ -9,7 +9,13 @@ import {
   type FormSectionElement,
 } from "@paperback/types";
 
-import { SORTS, STATUSES, TYPES, type ApiGenre, type KaynSearchMetadata } from "./models";
+import { SORTS, STATUSES, TYPES, type GenreChoice, type KaynSearchMetadata } from "./models";
+
+/**
+ * A row hands back one string per choice, so a genre standing for several of the
+ * site's ids carries them joined by a character an id is allowed to hold.
+ */
+const ID_JOIN = "+";
 
 /**
  * The site's own filters, offered as it publishes them.
@@ -20,7 +26,7 @@ import { SORTS, STATUSES, TYPES, type ApiGenre, type KaynSearchMetadata } from "
  * added tomorrow appears without the extension being touched.
  */
 export class KaynScanSearchForm extends AdvancedSearchForm {
-  private readonly genres: ApiGenre[];
+  private readonly genres: GenreChoice[];
 
   private sort: string[];
 
@@ -30,13 +36,15 @@ export class KaynScanSearchForm extends AdvancedSearchForm {
 
   private genreIds: string[];
 
-  constructor(metadata: KaynSearchMetadata | undefined, genres: ApiGenre[]) {
+  constructor(metadata: KaynSearchMetadata | undefined, genres: GenreChoice[]) {
     super();
     this.genres = genres;
     this.sort = metadata?.sort ? [metadata.sort] : [];
     this.status = metadata?.status ? [metadata.status] : [];
     this.type = metadata?.type ? [metadata.type] : [];
-    this.genreIds = (metadata?.genreIds ?? []).map((id) => String(id));
+    this.genreIds = (metadata?.genreIds ?? []).length
+      ? [(metadata?.genreIds ?? []).map((id) => String(id)).join(ID_JOIN)]
+      : [];
   }
 
   override getSections(): FormSectionElement<unknown>[] {
@@ -83,14 +91,15 @@ export class KaynScanSearchForm extends AdvancedSearchForm {
           }),
         }),
       ]),
-      Section({ id: "genres", footer: "The endpoint narrows on one genre at a time." }, [
+      Section({ id: "genres", footer: "Genres the site has actually tagged something with." }, [
         SelectRow("genres", {
           title: "Genre",
           layout: "list",
           value: this.genreIds,
-          items: this.genres
-            .filter((genre) => genre.id !== undefined && (genre.name ?? "").trim().length > 0)
-            .map((genre) => ({ id: String(genre.id), title: (genre.name ?? "").trim() })),
+          items: this.genres.map((genre) => ({
+            id: genre.ids.join(ID_JOIN),
+            title: genre.title,
+          })),
           minItemCount: 0,
           maxItemCount: 1,
           onValueChange: closureSelector(this, "genres", async (value: string[]) => {
@@ -103,7 +112,9 @@ export class KaynScanSearchForm extends AdvancedSearchForm {
   }
 
   override getSearchQueryMetadata(): KaynSearchMetadata {
-    const ids = this.genreIds.filter((id) => id.trim().length > 0);
+    const ids = this.genreIds
+      .flatMap((value) => value.split(ID_JOIN))
+      .filter((id) => id.trim().length > 0);
 
     return {
       ...(this.sort[0] ? { sort: this.sort[0] } : {}),
