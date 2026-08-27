@@ -1,5 +1,5 @@
 {
-  "buildTime": "2026-08-26T23:59:38.211Z",
+  "buildTime": "2026-08-27T00:04:44.638Z",
   "builtWith": {
     "toolchain": "1.0.0-alpha.92",
     "types": "1.0.0-alpha.92"
@@ -57,7 +57,7 @@
     {
       "name": "Kayn Scan",
       "description": "Extension that pulls content from kaynscan.org.",
-      "version": "6.0.0",
+      "version": "7.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "MATURE",
