@@ -63,8 +63,6 @@ export type ApiChapter = {
   price?: number | null;
 };
 
-export type ApiGenre = { id?: number; name?: string };
-
 /**
  * A genre as it is offered to the reader: one name, and every id the site files
  * it under. The search endpoint takes the ids together, separated by commas,
@@ -198,7 +196,6 @@ export const DEFAULT_SORT = "latest";
  * page. It is asked for once and kept a short while, since every row is cut
  * from it and asking per row would fetch the same half a megabyte each time. */
 export const POSTS_URL = `${API}/posts?perPage=500`;
-export const HOME_STATE_KEY = "kaynscan.home";
 export const HOME_TTL_MS = 10 * 60_000;
 
 /** How much of a row is worth keeping; the app pages through what it is given. */

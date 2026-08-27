@@ -72,7 +72,9 @@ function genreTags(series: ApiSeries): { id: string; title: string }[] {
         : String(genre.id);
 
     if (id) {
-      tags.push({ id, title });
+      // Written the way the genre row writes it, so a series does not shout a
+      // genre the rest of the extension spells plainly.
+      tags.push({ id, title: casingScore(title) > 0 ? title : titleCased(title) });
     }
   }
 
@@ -230,13 +232,59 @@ export type ReleaseItem = RowItem & { chapterId: string };
  * version, and a genre the site only ever writes in one case is given capitals
  * so it does not sit oddly beside the rest.
  */
+/**
+ * The name two spellings of one genre share.
+ *
+ * The site writes a genre in whatever case it likes, sometimes runs the words
+ * together, and has at least one name carrying an invisible mark that survives
+ * trimming - "Reincarnation" with a zero-width space on the end is a different
+ * string from "Reincarnation" but not a different genre. Reducing a name to its
+ * letters and digits is what lets those meet.
+ */
+function groupKey(name: string): string {
+  return name
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+/** Capitals where a name starts a word, without tripping over accents. */
+function titleCased(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/(^|[^\p{L}\p{N}'’])(\p{Ll})/gu, (_match, before: string, letter: string) => {
+      return before + letter.toUpperCase();
+    });
+}
+
+/**
+ * How well a name is written, out of the several ways the site writes it.
+ *
+ * A name shouted in capitals or whispered in none is worth less than one whose
+ * words each start with a capital, which is how a genre is normally set down.
+ */
+function casingScore(name: string): number {
+  const words = name.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+
+  if (!words.length || name === name.toUpperCase() || name === name.toLowerCase()) {
+    return 0;
+  }
+
+  return words.filter((word) => /^\p{Lu}/u.test(word)).length / words.length;
+}
+
 function displayName(group: { name: string; worn: number }[]): string {
-  const mixed = group.filter((entry) => /[a-z]/.test(entry.name) && /[A-Z]/.test(entry.name));
-  const best = [...(mixed.length ? mixed : group)].sort(
-    (left, right) => right.worn - left.worn || left.name.localeCompare(right.name),
+  const best = [...group].sort(
+    (left, right) =>
+      casingScore(right.name) - casingScore(left.name) ||
+      right.worn - left.worn ||
+      left.name.localeCompare(right.name),
   )[0]!.name;
 
-  return /[A-Z]/.test(best) ? best : best.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+  // A name the site only ever shouts or only ever whispers is set down the way
+  // the rest of the row is, so it does not sit oddly beside them.
+  return casingScore(best) > 0 ? best : titleCased(best);
 }
 
 export type HomeRows = {
@@ -364,18 +412,27 @@ export function toHomeRows(payload: ApiPosts, cap: number): HomeRows {
   const variants = new Map<string, { id: string; name: string; worn: number }[]>();
   for (const series of [...posts, ...novels]) {
     for (const genre of series.genres ?? []) {
-      if (typeof genre === "string" || genre?.id === undefined) {
+      if (typeof genre === "string" || genre?.id === undefined || genre.id === null) {
         continue;
       }
 
       const name = (genre.name ?? "").trim();
+      const id = String(genre.id);
 
-      if (!name) {
+      // An id that is not one of the site's own numbers cannot be asked about:
+      // the endpoint answers anything it does not recognise with the entire
+      // catalogue, which would show every title in the library under one genre.
+      if (!name || !/^\d+$/.test(id)) {
         continue;
       }
 
-      const id = String(genre.id);
-      const group = variants.get(name.toLowerCase()) ?? [];
+      const key = groupKey(name);
+
+      if (!key) {
+        continue;
+      }
+
+      const group = variants.get(key) ?? [];
       const seen = group.find((entry) => entry.id === id);
 
       if (seen) {
@@ -384,7 +441,7 @@ export function toHomeRows(payload: ApiPosts, cap: number): HomeRows {
         group.push({ id, name, worn: 1 });
       }
 
-      variants.set(name.toLowerCase(), group);
+      variants.set(key, group);
     }
   }
 
@@ -412,7 +469,10 @@ export function toHomeRows(payload: ApiPosts, cap: number): HomeRows {
     // alphabetical row leads with whatever oddity starts with a digit.
     genres: [...variants.values()]
       .map((group) => ({
-        ids: [...group].sort((left, right) => right.worn - left.worn).map((entry) => entry.id),
+        // The endpoint does not care what order the ids come in, but the form
+        // remembers a genre by them joined together - so they are put in a
+        // fixed order rather than one that shifts as the site tags new titles.
+        ids: group.map((entry) => entry.id).sort((left, right) => Number(left) - Number(right)),
         title: displayName(group),
         worn: group.reduce((total, entry) => total + entry.worn, 0),
       }))

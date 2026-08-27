@@ -42,9 +42,29 @@ export class KaynScanSearchForm extends AdvancedSearchForm {
     this.sort = metadata?.sort ? [metadata.sort] : [];
     this.status = metadata?.status ? [metadata.status] : [];
     this.type = metadata?.type ? [metadata.type] : [];
-    this.genreIds = (metadata?.genreIds ?? []).length
-      ? [(metadata?.genreIds ?? []).map((id) => String(id)).join(ID_JOIN)]
-      : [];
+    this.genreIds = KaynScanSearchForm.selected(genres, metadata?.genreIds ?? []);
+  }
+
+  /**
+   * Which entry in the list a set of ids belongs to.
+   *
+   * A genre is remembered by the ids it stands for, and a row can only mark an
+   * entry it recognises by its own name for it. Matching on any id in common
+   * rather than on the joined string means a genre still shows as chosen after
+   * the site tags something new, and that a filter set by an older version of
+   * this extension - which knew a genre by a single id - is understood rather
+   * than quietly dropped.
+   */
+  private static selected(genres: GenreChoice[], ids: (string | number)[]): string[] {
+    const wanted = ids.flatMap((id) => String(id).split(ID_JOIN)).filter((id) => id.length > 0);
+
+    if (!wanted.length) {
+      return [];
+    }
+
+    const match = genres.find((genre) => genre.ids.some((id) => wanted.includes(id)));
+
+    return match ? [match.ids.join(ID_JOIN)] : [];
   }
 
   override getSections(): FormSectionElement<unknown>[] {

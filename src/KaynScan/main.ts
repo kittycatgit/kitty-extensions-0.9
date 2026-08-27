@@ -124,7 +124,13 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
     // everything wearing any of them - which is how one genre the site happens
     // to file under three ids is asked about in a single question.
     if (filters.genreIds?.length) {
-      parts.push(`genreIds=${filters.genreIds.map((id) => encodeURIComponent(id)).join(",")}`);
+      const ids = filters.genreIds
+        .flatMap((id) => String(id).split("+"))
+        .filter((id) => /^\d+$/.test(id));
+
+      if (ids.length) {
+        parts.push(`genreIds=${ids.join(",")}`);
+      }
     }
 
     return `${API}/query?${parts.join("&")}`;
