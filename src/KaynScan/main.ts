@@ -27,7 +27,6 @@ import {
   DEFAULT_SORT,
   GENRES_SECTION_ID,
   HOME_SECTIONS,
-  HOME_STATE_KEY,
   HOME_TTL_MS,
   COMPLETED_SECTION_ID,
   MOST_POPULAR_SECTION_ID,
@@ -62,6 +61,17 @@ import {
   type HomeRows,
 } from "./parsers";
 import type pbconfigType from "./pbconfig";
+
+/**
+ * The derived home rows, kept in memory rather than in stored state.
+ *
+ * Stored state refuses anything over 128 KB, and eight rows of cards are well
+ * past that - which is why every row came back reporting the limit instead of
+ * any titles. Module scope lives as long as the extension does, which is all a
+ * cache of this kind needs; if it is ever torn down, the catalogue is simply
+ * asked for again.
+ */
+let homeCache: { rows: HomeRows; at: number } | undefined;
 
 class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
   private readonly cookieStorage = new CookieStorageInterceptor({ storage: "stateManager" });
@@ -134,16 +144,14 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
    * over. What is kept is only what the rows need, not the reply itself.
    */
   private async home(): Promise<HomeRows> {
-    const held = Application.getState(HOME_STATE_KEY) as { rows: HomeRows; at: number } | undefined;
-
-    if (held && Date.now() - held.at < HOME_TTL_MS) {
-      return held.rows;
+    if (homeCache && Date.now() - homeCache.at < HOME_TTL_MS) {
+      return homeCache.rows;
     }
 
     const payload = await this.json<ApiPosts>(POSTS_URL);
     const rows = toHomeRows(payload, ROW_CAP);
 
-    Application.setState({ rows, at: Date.now() }, HOME_STATE_KEY);
+    homeCache = { rows, at: Date.now() };
     return rows;
   }
 
