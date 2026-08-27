@@ -25,7 +25,20 @@ export interface StatusTypes {
   COMPLETED: string;
 }
 
-export type MangaStreamSearchMetadata = {
+/**
+ * What the reader asked for, beyond a title.
+ *
+ * The site's own listing takes one genre or several, and one of each of the
+ * other three, so that is what is carried here and put back into the URL.
+ */
+export type MangaStreamFilters = {
+  genres?: string[];
+  status?: string;
+  type?: string;
+  order?: string;
+};
+
+export type MangaStreamSearchMetadata = MangaStreamFilters & {
   page?: number;
 };
 

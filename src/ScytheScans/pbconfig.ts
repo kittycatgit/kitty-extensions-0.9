@@ -9,7 +9,7 @@ let pbConfig = basePbConfig;
 
 pbConfig.name = "ScytheScans";
 pbConfig.description = "Extension that pulls content from scythescans.com.";
-pbConfig.version = "8.0.0";
+pbConfig.version = "9.0.0";
 pbConfig.contentRating = ContentRating.MATURE;
 pbConfig.developers = [
   {

@@ -17,7 +17,11 @@ import { type CheerioAPI } from "cheerio";
 import * as cheerio from "cheerio";
 
 import { MangaStreamGeneric } from "../mangastream/main";
-import type { MangaStreamDiscoverSection, MangaStreamSearchMetadata } from "../mangastream/models";
+import type {
+  MangaStreamDiscoverSection,
+  MangaStreamFilters,
+  MangaStreamSearchMetadata,
+} from "../mangastream/models";
 import pbconfig from "./pbconfig";
 
 const DOMAIN_NAME: string = "https://scythescans.com";
@@ -244,15 +248,18 @@ class ScytheScansExtension extends MangaStreamGeneric {
    * single page rather than looping forever.
    */
   override async getSearchResults(
-    query: SearchQuery<never>,
+    query: SearchQuery<MangaStreamFilters>,
     metadata: MangaStreamSearchMetadata | undefined,
   ): Promise<PagedResults<SearchResultItem>> {
     const page = metadata?.page ?? 1;
     const title = (query.title ?? "").trim();
 
     if (!title) {
-      const browsed = await super.getSearchResults(query, { page: 1 });
-      return { items: browsed.items };
+      // Browsing and filtering are the listing the base class already knows how
+      // to walk; it was being asked for the first page every time and its answer
+      // about further pages thrown away, so a reader could never get past page
+      // one of anything but a title search.
+      return super.getSearchResults(query, metadata);
     }
 
     const path = page > 1 ? `/page/${page}` : "";

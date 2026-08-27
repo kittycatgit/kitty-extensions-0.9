@@ -22,18 +22,14 @@ import {
   type SourceManga,
   type TagSection,
 } from "@paperback/types";
-import {
-  SearchFilterForm,
-  type SearchFilter,
-  type SearchFilterValue,
-} from "@paperback/types/lib/compat/0.8";
 import * as cheerio from "cheerio";
 import { type AnyNode } from "domhandler";
 
 import type { basePbConfig } from "./config";
-import { getUsePostIds, MangaStreamSettings } from "./forms";
+import { getUsePostIds, MangaStreamSearchForm, MangaStreamSettings, valueOf } from "./forms";
 import {
   type MangaStreamDiscoverSection,
+  type MangaStreamFilters,
   type MangaStreamSearchMetadata,
   type MangaStreamSlug,
   type Months,
@@ -41,7 +37,6 @@ import {
 } from "./models";
 import { MangaStreamInterceptor } from "./network";
 import { MangaStreamParser } from "./parsers";
-import { getFilterTagsBySection, getIncludedTagBySection } from "./utils";
 
 export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbConfig> {
   abstract domain: string;
@@ -119,30 +114,6 @@ export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbC
     this.configureSections();
   }
 
-  async getSearchFilters(): Promise<SearchFilter[]> {
-    const filters: SearchFilter[] = [];
-    try {
-      for (const tags of await this.getSearchTags()) {
-        filters.push({
-          type: "multiselect",
-          options: tags.tags.map((x) => ({
-            id: x.id,
-            value: x.title,
-          })),
-          id: tags.id,
-          allowExclusion: false,
-          title: tags.title,
-          value: {},
-          allowEmptySelection: true,
-          maximum: undefined,
-        });
-      }
-    } catch (e) {
-      console.log(e);
-    }
-    return filters;
-  }
-
   globalRateLimiter = new BasicRateLimiter("ratelimiter", {
     numberOfRequests: 20,
     bufferInterval: 1,
@@ -160,7 +131,13 @@ export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbC
     this.interceptor.registerInterceptor();
   }
 
-  async getSearchTags(): Promise<TagSection[]> {
+  /**
+   * The four dropdowns the theme puts above its listing, read off the page.
+   *
+   * They change only when the site adds a genre, so they are kept between
+   * openings rather than fetched every time the filter sheet appears.
+   */
+  async searchTags(): Promise<TagSection[]> {
     let tags: TagSection[] = Application.getState("tags") as TagSection[];
     if (tags) {
       return tags;
@@ -177,16 +154,18 @@ export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbC
     return tags;
   }
 
-  async getAdvancedSearchForm(query: SearchQuery<SearchFilterValue[]>) {
-    // TODO: Replace compat wrapper with proper search form implementation
-    return new SearchFilterForm(query.metadata, this.getSearchFilters());
+  async getAdvancedSearchForm(query: SearchQuery<MangaStreamFilters>) {
+    return new MangaStreamSearchForm(query.metadata, await this.searchTags());
   }
 
   async getSearchResults(
-    query: SearchQuery<SearchFilterValue[]>,
+    query: SearchQuery<MangaStreamFilters>,
     metadata: MangaStreamSearchMetadata | undefined,
   ): Promise<PagedResults<SearchResultItem>> {
     const page: number = metadata?.page ?? 1;
+    // The filters are chosen once and then carried from page to page, so a
+    // second page of a filtered listing is still that listing.
+    const filters: MangaStreamFilters = { ...query?.metadata, ...metadata };
 
     let urlBuilder: URL = new URL(this.domain)
       .addPathComponent(this.directoryPath)
@@ -198,18 +177,19 @@ export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbC
         encodeURIComponent(query?.title.replace(/[’–][a-z]*/g, "") ?? ""),
       );
     } else {
-      const includedTags: string[] = [];
-      for (const filter of query?.metadata ?? []) {
-        const tags = (filter.value ?? {}) as Record<string, "included" | "excluded">;
-        for (const tag of Object.entries(tags)) {
-          includedTags.push(tag[0]);
-        }
+      // The theme's own form posts its genres as repeated `genre[]` items and
+      // the rest as single values; sending them any other way answers with a
+      // server error rather than a listing.
+      const genres = (filters.genres ?? []).map(valueOf).filter((genre) => genre.length > 0);
+
+      if (genres.length) {
+        urlBuilder = urlBuilder.setQueryItem("genre[]", genres);
       }
+
       urlBuilder = urlBuilder
-        .setQueryItem("genre", getFilterTagsBySection("genres", includedTags, true))
-        .setQueryItem("status", getIncludedTagBySection("status", includedTags))
-        .setQueryItem("type", getIncludedTagBySection("type", includedTags))
-        .setQueryItem("order", getIncludedTagBySection("order", includedTags));
+        .setQueryItem("status", valueOf(filters.status ?? ""))
+        .setQueryItem("type", valueOf(filters.type ?? ""))
+        .setQueryItem("order", valueOf(filters.order ?? ""));
     }
 
     const request = {
@@ -235,15 +215,11 @@ export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbC
       });
     }
 
-    metadata = !this.parser.isLastPage($, "view_more") ? { page: page + 1 } : undefined;
+    metadata = !this.parser.isLastPage($) ? { ...filters, page: page + 1 } : undefined;
     return {
       items: manga,
       metadata,
     };
-  }
-
-  supportsTagExclusion(): boolean {
-    return false;
   }
 
   async getMangaDetails(mangaId: string): Promise<SourceManga> {

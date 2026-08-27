@@ -379,23 +379,16 @@ export class MangaStreamParser {
     };
   }
 
-  isLastPage = ($: CheerioAPI, id: string): boolean => {
-    let isLast = true;
-    if (id == "view_more") {
-      const hasNext = Boolean($("a.r")[0]);
-      if (hasNext) {
-        isLast = false;
-      }
-    }
-
-    if (id == "search_request") {
-      const hasNext = Boolean($("a.next.page-numbers")[0]);
-      if (hasNext) {
-        isLast = false;
-      }
-    }
-
-    return isLast;
+  /**
+   * Whether a listing has run out of pages.
+   *
+   * A site on this theme renders either the theme's own arrow or WordPress's
+   * numbered pagination, never both, so a page is the last one only when
+   * neither offers anything to go on to. Asking about one marker alone made
+   * every first page look like the only page on a site that uses the other.
+   */
+  isLastPage = ($: CheerioAPI): boolean => {
+    return !$("a.r")[0] && !$("a.next.page-numbers")[0];
   };
 
   getImageSrc(imageObj: Cheerio<Element> | undefined): string {

@@ -1,7 +1,20 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright © 2026 Inkdex */
 
-import { ButtonRow, Form, LabelRow, Section, ToggleRow } from "@paperback/types";
+import {
+  AdvancedSearchForm,
+  ButtonRow,
+  Form,
+  LabelRow,
+  Section,
+  SelectRow,
+  ToggleRow,
+  closureSelector,
+  type FormSectionElement,
+  type TagSection,
+} from "@paperback/types";
+
+import type { MangaStreamFilters } from "./models";
 
 function toBoolean(value: unknown): boolean {
   return (value ?? false) === "true";
@@ -69,4 +82,126 @@ export class MangaStreamSettings extends Form {
   async resetState(): Promise<void> {
     Application.resetAllState();
   }
+}
+
+/**
+ * The site's own filters, as the site publishes them.
+ *
+ * The theme puts four dropdowns above its listing - genres, status, type and
+ * ordering - and every one of them is read off the page rather than written
+ * down here, so a genre added tomorrow appears without this being touched.
+ * Genres narrow together; the other three take one choice each, which is all
+ * the listing understands.
+ */
+export class MangaStreamSearchForm extends AdvancedSearchForm {
+  private readonly sections: TagSection[];
+
+  private genres: string[];
+
+  private status: string[];
+
+  private type: string[];
+
+  private order: string[];
+
+  constructor(filters: MangaStreamFilters | undefined, sections: TagSection[]) {
+    super();
+    this.sections = sections;
+    this.genres = filters?.genres ?? [];
+    this.status = filters?.status ? [filters.status] : [];
+    this.type = filters?.type ? [filters.type] : [];
+    this.order = filters?.order ? [filters.order] : [];
+  }
+
+  /** The tags of one dropdown, by the name the parser gives that dropdown. */
+  private itemsFor(title: string): { id: string; title: string }[] {
+    const section = this.sections.find((candidate) => candidate.title === title);
+
+    return (section?.tags ?? [])
+      .map((tag) => ({ id: valueOf(tag.id), title: tag.title }))
+      .filter((tag) => tag.id.length > 0 && tag.title.length > 0);
+  }
+
+  override getSections(): FormSectionElement<unknown>[] {
+    const genres = this.itemsFor("genres");
+
+    return [
+      Section({ id: "genres", footer: "Genres narrow the listing together." }, [
+        SelectRow("genres", {
+          title: "Genres",
+          layout: "list",
+          value: this.genres,
+          items: genres,
+          minItemCount: 0,
+          // Every genre at once is a pointless search but a legitimate one, and
+          // the row needs a number rather than being left to guess.
+          maxItemCount: Math.max(genres.length, 1),
+          onValueChange: closureSelector(this, "genres", async (value: string[]) => {
+            this.genres = value;
+            this.reloadForm();
+          }),
+        }),
+      ]),
+      Section({ id: "filters" }, [
+        SelectRow("status", {
+          title: "Status",
+          layout: "list",
+          value: this.status,
+          items: this.itemsFor("status"),
+          minItemCount: 0,
+          maxItemCount: 1,
+          onValueChange: closureSelector(this, "status", async (value: string[]) => {
+            this.status = value;
+            this.reloadForm();
+          }),
+        }),
+        SelectRow("type", {
+          title: "Type",
+          layout: "list",
+          value: this.type,
+          items: this.itemsFor("type"),
+          minItemCount: 0,
+          maxItemCount: 1,
+          onValueChange: closureSelector(this, "type", async (value: string[]) => {
+            this.type = value;
+            this.reloadForm();
+          }),
+        }),
+        SelectRow("order", {
+          title: "Order by",
+          layout: "list",
+          value: this.order,
+          items: this.itemsFor("order"),
+          minItemCount: 0,
+          maxItemCount: 1,
+          onValueChange: closureSelector(this, "order", async (value: string[]) => {
+            this.order = value;
+            this.reloadForm();
+          }),
+        }),
+      ]),
+    ];
+  }
+
+  override getSearchQueryMetadata(): MangaStreamFilters {
+    const genres = this.genres.filter((genre) => genre.length > 0);
+
+    return {
+      ...(genres.length ? { genres } : {}),
+      ...(this.status[0] ? { status: this.status[0] } : {}),
+      ...(this.type[0] ? { type: this.type[0] } : {}),
+      ...(this.order[0] ? { order: this.order[0] } : {}),
+    };
+  }
+}
+
+/**
+ * The value the site expects, out of the id the parser built.
+ *
+ * The parser labels a tag with the dropdown it came from - "genres_4" - so the
+ * listing gets "4", which is what its own form would have sent.
+ */
+export function valueOf(id: string): string {
+  const separator = id.indexOf("_");
+  return separator === -1 ? id : id.slice(separator + 1);
 }
