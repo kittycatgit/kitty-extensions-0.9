@@ -539,6 +539,9 @@ const NOVEL_ELEMENTS = new Set([
   "th",
 ]);
 
+/** The namespace a document must declare to be read as XHTML. */
+const XHTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+
 /** Elements written without a closing tag, which XHTML wants closed anyway. */
 const NOVEL_VOID_ELEMENTS = new Set(["br", "hr", "img"]);
 
@@ -606,12 +609,14 @@ function toXhtml(nodes: AnyNode[]): string {
 }
 
 /**
- * A novel chapter's text, as the reader can render it.
+ * A novel chapter's text, as the reader needs it handed over.
  *
- * The markup is read the forgiving way a browser reads a page - unclosed tags
- * and all - and written back out the strict way the reader requires, under a
- * single root element, since some chapters open with a line of bare text that
- * would otherwise have nothing holding it.
+ * The reader does not take a piece of markup - it takes a whole XHTML document,
+ * namespace and all, and parses it as XML. A fragment, or a page with anything
+ * unclosed in it, ends the chapter at that point and prints the parser's own
+ * error where the words should be. The site's markup is therefore read the
+ * forgiving way a browser reads a page, written back out closed, and handed
+ * over inside a document rather than on its own.
  */
 export function toNovelHtml($: CheerioAPI, detail: ApiChapterDetail): string {
   const content = (detail.content ?? "").trim();
@@ -623,5 +628,9 @@ export function toNovelHtml($: CheerioAPI, detail: ApiChapterDetail): string {
   const parsed = $(`<div>${content}</div>`);
   const body = toXhtml(parsed.contents().toArray() as AnyNode[]).trim();
 
-  return body ? `<div>${body}</div>` : "";
+  if (!body) {
+    return "";
+  }
+
+  return `<html xmlns="${XHTML_NAMESPACE}"><head></head><body>${body}</body></html>`;
 }
