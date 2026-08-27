@@ -41,6 +41,9 @@ export type ApiSeries = {
   postContent?: string;
   featuredImage?: string | null;
   seriesType?: string | null;
+  /** The site's own answer to whether a series is prose. Its `seriesType` label
+   * is a display field and gets this wrong; this does not. */
+  isNovel?: boolean | null;
   seriesStatus?: string | null;
   hot?: boolean;
   isNew?: boolean;

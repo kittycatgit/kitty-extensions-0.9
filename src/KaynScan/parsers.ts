@@ -90,7 +90,7 @@ function genreTags(series: ApiSeries): { id: string; title: string }[] {
  */
 export function seriesSubtitle(series: ApiSeries): string | undefined {
   const bits: string[] = [];
-  const type = (series.seriesType ?? "").trim();
+  const type = isNovel(series) ? "NOVEL" : (series.seriesType ?? "").trim();
   const status = (series.seriesStatus ?? "").trim();
 
   if (type) {
@@ -139,6 +139,20 @@ export function toSearchResult(series: ApiSeries): SearchResultItem | undefined 
   };
 }
 
+/**
+ * Whether a series is prose rather than pictures.
+ *
+ * The site keeps a flag for this and also a `seriesType` label, and the label
+ * is not to be trusted: two of its novels are filed under it as MANHWA. Reading
+ * the label alone marked those two as comics, and the app then refused to open
+ * a chapter of them at all, since it will not render prose in a comic reader.
+ * The flag is what the site itself goes by; the label is only a fallback for
+ * anything answering without it.
+ */
+function isNovel(series: ApiSeries): boolean {
+  return series.isNovel === true || (series.seriesType ?? "").trim().toUpperCase() === "NOVEL";
+}
+
 /** The site's own words for where a series stands, in the app's casing. */
 function statusOf(raw: string | null | undefined): string {
   const value = (raw ?? "").trim();
@@ -152,7 +166,7 @@ function statusOf(raw: string | null | undefined): string {
  * printed with its tags showing.
  */
 export function toSourceManga($: CheerioAPI, series: ApiSeries, mangaId: string): SourceManga {
-  const type = (series.seriesType ?? "").trim();
+  const type = isNovel(series) ? "NOVEL" : (series.seriesType ?? "").trim();
   const tags = genreTags(series);
   const tagGroups: TagSection[] = tags.length ? [{ id: "genres", title: "Genres", tags }] : [];
 
@@ -166,9 +180,10 @@ export function toSourceManga($: CheerioAPI, series: ApiSeries, mangaId: string)
       thumbnailUrl: usable(series.featuredImage),
       synopsis,
       contentRating: ContentRating.MATURE,
-      // The app reads a novel differently from a comic, so it is told which
-      // this is rather than being left to find out at the first chapter.
-      contentType: type.toUpperCase() === "NOVEL" ? "novel" : "comic",
+      // The app reads a novel differently from a comic, and refuses to open a
+      // chapter of one as the other, so it is told which this is rather than
+      // being left to find out at the first chapter.
+      contentType: isNovel(series) ? "novel" : "comic",
       status: statusOf(series.seriesStatus),
       shareUrl: seriesPageUrl(mangaId),
       ...(typeof series.averageRating === "number" && series.averageRating > 0
