@@ -511,7 +511,11 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
           "/api/Reader/mark-chapter-read",
           { server, token },
           {
-            seriesId: Number(action.chapterMangaId),
+            // The tracked title's own id, not the id of whichever source the
+            // chapter was read from. A title read elsewhere and tracked here
+            // still belongs to a series on this server, and `chapterMangaId`
+            // would be that other source's id.
+            seriesId: Number(action.sourceManga.mangaId),
             chapterId: Number(action.chapterId),
           },
         );
