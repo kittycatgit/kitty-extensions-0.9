@@ -19,6 +19,49 @@ export const MODE_KEY = "kavita.authmode";
 /** Whether the side nav's own rows are shown beside the dashboard's. */
 export const SHELVES_KEY = "kavita.shelves";
 
+/** Where a sign-in that has already happened is kept, out of ordinary state. */
+export const SESSION_KEY = "kavita.session";
+
+/**
+ * A sign-in the server has already granted.
+ *
+ * Kept so that starting the app does not mean sending a password again. The app
+ * writes the body of every request it makes into its own log, and readers hand
+ * those logs to whoever is helping them - so a password sent on each launch is a
+ * password in every log they ever share. A token can be rotated; an account
+ * password is the account, and is usually a password used somewhere else too.
+ */
+export interface StoredSession {
+  fingerprint: string;
+  server: string;
+  username: string;
+  token: string;
+  refresh: string;
+  imageKey: string;
+}
+
+/** The sign-in kept from last time, if there is a usable one. */
+export function storedSession(): StoredSession | undefined {
+  const raw = Application.getSecureState(SESSION_KEY);
+
+  if (typeof raw !== "string" || !raw) {
+    return undefined;
+  }
+
+  try {
+    const value = JSON.parse(raw) as StoredSession;
+
+    return value?.token && value?.refresh ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Keeps a sign-in for next time, or clears it. */
+export function keepSession(session: StoredSession | undefined): void {
+  Application.setSecureState(session ? JSON.stringify(session) : undefined, SESSION_KEY);
+}
+
 /** The ways Kavita will let a source in. */
 export const MODE_PASSWORD = "password";
 export const MODE_API_KEY = "apikey";

@@ -21,6 +21,7 @@ import {
 import {
   FORMAT_ARCHIVE,
   imageKeyFrom,
+  keepSession,
   MODE_API_KEY,
   FORMAT_EPUB,
   FORMAT_PDF,
@@ -30,6 +31,7 @@ import {
   navSource,
   navTitle,
   STREAM_PATHS,
+  storedSession,
   storedShelves,
   streamTitle,
   seriesCoverUrl,
@@ -63,6 +65,7 @@ interface Session {
   server: string;
   username: string;
   token: string;
+  refresh: string;
   imageKey: string;
 }
 
@@ -171,15 +174,73 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
       throw new Error("Kavita accepted the sign-in but returned no token.");
     }
 
-    return {
+    const session: Session = {
       fingerprint: fingerprint(credentials),
       server: credentials.server,
       username: (body.username ?? "").trim() || "your account",
       token: body.token,
+      refresh: (body.refreshToken ?? "").trim(),
       // A key the reader gave us is itself a key, so it can address artwork if
       // the server did not name one in its answer.
       imageKey: imageKeyFrom(body, byKey ? credentials.apiKey : ""),
     };
+
+    keepSession(session.refresh ? session : undefined);
+
+    return session;
+  }
+
+  /**
+   * Picks up a sign-in the server already granted, without sending a password.
+   *
+   * This is not a fallback for a failed sign-in - it is the ordinary path, and
+   * signing in properly is what happens when there is nothing to resume. The
+   * point is what does *not* travel: the app records the body of every request
+   * in a log readers share when asking for help, so a launch that re-sends a
+   * password puts that password in every one of those logs.
+   */
+  private async resume(credentials: KavitaCredentials): Promise<Session | undefined> {
+    const kept = storedSession();
+
+    if (!kept || kept.fingerprint !== fingerprint(credentials)) {
+      return undefined;
+    }
+
+    const [response, buffer] = await Application.scheduleRequest({
+      url: `${credentials.server}/api/Account/refresh-token`,
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token: kept.token, refreshToken: kept.refresh }),
+    });
+
+    if (response.status !== 200) {
+      // The refresh token has aged out or been revoked. Nothing is wrong; the
+      // caller signs in again.
+      keepSession(undefined);
+      return undefined;
+    }
+
+    try {
+      const body = JSON.parse(Application.arrayBufferToUTF8String(buffer)) as KavitaLogin;
+
+      if (!body?.token) {
+        keepSession(undefined);
+        return undefined;
+      }
+
+      const session: Session = {
+        ...kept,
+        token: body.token,
+        refresh: (body.refreshToken ?? "").trim() || kept.refresh,
+      };
+
+      keepSession(session);
+
+      return session;
+    } catch {
+      keepSession(undefined);
+      return undefined;
+    }
   }
 
   /** The current sign-in, made if there is not one yet. */
@@ -191,7 +252,7 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
       return session;
     }
 
-    session = await this.authenticate(credentials);
+    session = (await this.resume(credentials)) ?? (await this.authenticate(credentials));
 
     return session;
   }

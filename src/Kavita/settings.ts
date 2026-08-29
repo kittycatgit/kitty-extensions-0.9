@@ -17,6 +17,7 @@ import {
   MODE_API_KEY,
   MODE_KEY,
   MODE_PASSWORD,
+  keepSession,
   normaliseServer,
   SHELVES_KEY,
   storedShelves,
@@ -114,8 +115,8 @@ export class KavitaSettings extends Form {
           id: "method",
           header: "How to sign in",
           footer: byKey
-            ? "Kavita issues keys with an expiry, so this will need replacing when it lapses. Use the key named for OPDS - an image-only key cannot list your libraries."
-            : "Your Kavita account. It does not expire, and there is nothing to copy across by hand.",
+            ? "Kavita issues keys with an expiry, so this will need replacing when it lapses. Use the key named for OPDS - an image-only key cannot list your libraries. A key can be rotated on the server, which is worth preferring if you ever share app logs."
+            : "Your Kavita account. It does not expire, and there is nothing to copy across by hand. Signing in this way sends your password once; after that this source renews its own session instead.",
         },
         [
           SelectRow("method", {
@@ -206,6 +207,7 @@ export class KavitaSettings extends Form {
     this.mode = value[0] === MODE_API_KEY ? MODE_API_KEY : MODE_PASSWORD;
     this.ok = false;
     this.status = "";
+    keepSession(undefined);
     Application.setState(this.mode, MODE_KEY);
     this.reloadForm();
   }
@@ -300,6 +302,7 @@ export class KavitaSettings extends Form {
     Application.setState(undefined, USER_KEY);
     Application.setSecureState(undefined, PASS_KEY);
     Application.setSecureState(undefined, API_KEY);
+    keepSession(undefined);
     this.reloadForm();
   }
 }
