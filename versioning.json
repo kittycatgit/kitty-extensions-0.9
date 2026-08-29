@@ -1,5 +1,5 @@
 {
-  "buildTime": "2026-08-29T23:19:21.224Z",
+  "buildTime": "2026-08-29T23:58:36.408Z",
   "builtWith": {
     "toolchain": "1.0.0-alpha.92",
     "types": "1.0.0-alpha.92"
@@ -126,7 +126,7 @@
     {
       "name": "MangaHub",
       "description": "Extension that pulls content from mangahub.io.",
-      "version": "4.0.0",
+      "version": "5.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "ADULT",
