@@ -162,6 +162,7 @@ export interface KavitaChapter {
   title?: string | null;
   titleName?: string | null;
   pages?: number;
+  pagesRead?: number;
   isSpecial?: boolean;
   volumeId?: number;
   sortOrder?: number;

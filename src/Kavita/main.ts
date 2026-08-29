@@ -3,6 +3,10 @@
 
 import {
   DiscoverSectionType,
+  type ChapterReadActionQueueProcessingResult,
+  type Form,
+  type MangaProgress,
+  type TrackedMangaChapterReadAction,
   type Chapter,
   type ChapterDetails,
   type DiscoverSection,
@@ -39,6 +43,7 @@ import {
   type KavitaSideNavStream,
 } from "./models";
 import pbconfig from "./pbconfig";
+import { KavitaProgressForm } from "./progress";
 import { KavitaSettings } from "./settings";
 
 /**
@@ -62,23 +67,30 @@ interface Session {
 
 let session: Session | undefined;
 
-/**
- * What the chapter listing already told us.
- *
- * Kavita's series-detail answer carries every chapter's page count, so asking
- * chapter-info for it again is a second round trip for something already known
- * - and on some chapters that endpoint answers 500, which took the chapter down
- * with it. Reading a series fills these in, and opening a chapter reads them.
- */
-const chapterPages = new Map<string, number>();
-const seriesFormat = new Map<string, number>();
-
 /** What a sign-in was made from, for noticing when it no longer matches. */
 function fingerprint(credentials: KavitaCredentials): string {
   return credentials.mode === MODE_API_KEY
     ? [credentials.server, credentials.mode, credentials.apiKey].join("\n")
     : [credentials.server, credentials.mode, credentials.username, credentials.password].join("\n");
 }
+
+/**
+ * What the chapter listing already told us.
+ *
+ * Kavita's series-detail answer carries every chapter's page count, the volume
+ * it belongs to and the series it came from - everything needed both to open a
+ * chapter and to tell the server how far it was read. Asking chapter-info for
+ * any of it again would be a second round trip for something already known, and
+ * on some chapters that endpoint answers 500.
+ */
+interface ChapterFacts {
+  pages: number;
+  seriesId: number;
+  volumeId: number;
+}
+
+const chapterFacts = new Map<string, ChapterFacts>();
+const seriesFacts = new Map<string, { format: number; libraryId: number }>();
 
 /**
  * The discover rows are Kavita's own dashboard, not a set chosen here.
@@ -257,6 +269,7 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
 
   async getMangaDetails(mangaId: string): Promise<SourceManga> {
     const { server, imageKey, token } = await this.signedIn();
+
     const series = await this.request<KavitaSeries & { summary?: string }>(
       `/api/Series/${encodeURIComponent(mangaId)}`,
       { server, token },
@@ -267,7 +280,10 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
       { server, token },
     ).catch(() => undefined);
 
-    seriesFormat.set(mangaId, series?.format ?? FORMAT_ARCHIVE);
+    seriesFacts.set(mangaId, {
+      format: series?.format ?? FORMAT_ARCHIVE,
+      libraryId: series?.libraryId ?? 0,
+    });
 
     const secondary = [series?.originalName, series?.localizedName]
       .map((value) => (value ?? "").trim())
@@ -313,10 +329,17 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
    * ordering is the server's own answer to specials, one-shots and volumes that
    * carry no chapter number.
    */
-  async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
+  /**
+   * Every chapter of a series, as the server lists them.
+   *
+   * Kept apart from building the app's own chapters because reading progress
+   * needs what the server said - how far into each chapter the reader got -
+   * which the app's chapter has no room for.
+   */
+  private async rawChapters(mangaId: string): Promise<KavitaChapter[]> {
     const { server, token } = await this.signedIn();
     const detail = await this.request<KavitaSeriesDetail>(
-      `/api/Series/series-detail?seriesId=${encodeURIComponent(sourceManga.mangaId)}`,
+      `/api/Series/series-detail?seriesId=${encodeURIComponent(mangaId)}`,
       { server, token },
     );
 
@@ -328,7 +351,7 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
             ...(detail?.chapters ?? []),
           ];
 
-    const chapters: Chapter[] = [];
+    const rows: KavitaChapter[] = [];
     const seen = new Set<number>();
 
     for (const row of [...flat, ...(detail?.specials ?? [])]) {
@@ -337,29 +360,45 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
       }
 
       seen.add(row.id);
-      chapterPages.set(String(row.id), row.pages ?? 0);
-
-      // Kavita marks "this file has no chapter number of its own" with a very
-      // large negative number rather than an absent one.
-      const raw = row.minNumber ?? Number(row.number ?? 0);
-      const number = Number.isFinite(raw) && raw > -1000 ? raw : 0;
-      const name = (row.titleName ?? "").trim() || (row.title ?? "").trim();
-      const published = row.releaseDate ? new Date(row.releaseDate) : undefined;
-
-      chapters.push({
-        chapterId: String(row.id),
-        sourceManga,
-        langCode: "en",
-        chapNum: number,
-        sortingIndex: row.sortOrder ?? number,
-        ...(name && name !== `Chapter ${number}` ? { title: name } : {}),
-        ...(published && !isNaN(published.getTime()) && published.getFullYear() > 1
-          ? { publishDate: published }
-          : {}),
+      chapterFacts.set(String(row.id), {
+        pages: row.pages ?? 0,
+        seriesId: Number(mangaId),
+        volumeId: row.volumeId ?? 0,
       });
+      rows.push(row);
     }
 
-    return chapters.sort((a, b) => b.chapNum - a.chapNum);
+    return rows;
+  }
+
+  /** One chapter, as the app describes it. */
+  private toChapter(row: KavitaChapter, sourceManga: SourceManga): Chapter {
+    // Kavita marks "this file has no chapter number of its own" with a very
+    // large negative number rather than an absent one.
+    const raw = row.minNumber ?? Number(row.number ?? 0);
+    const number = Number.isFinite(raw) && raw > -1000 ? raw : 0;
+    const name = (row.titleName ?? "").trim() || (row.title ?? "").trim();
+    const published = row.releaseDate ? new Date(row.releaseDate) : undefined;
+
+    return {
+      chapterId: String(row.id),
+      sourceManga,
+      langCode: "en",
+      chapNum: number,
+      sortingIndex: row.sortOrder ?? number,
+      ...(name && name !== `Chapter ${number}` ? { title: name } : {}),
+      ...(published && !isNaN(published.getTime()) && published.getFullYear() > 1
+        ? { publishDate: published }
+        : {}),
+    };
+  }
+
+  async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
+    const rows = await this.rawChapters(sourceManga.mangaId);
+
+    return rows
+      .map((row) => this.toChapter(row, sourceManga))
+      .sort((a, b) => b.chapNum - a.chapNum);
   }
 
   /**
@@ -371,26 +410,30 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
    */
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
     const { server, imageKey, token } = await this.signedIn();
+
     const mangaId = chapter.sourceManga.mangaId;
 
     // Both of these are normally already known from opening the series. A
     // chapter reached without that - resumed from the library, say - fills them
     // from the same endpoints the series page uses, rather than from
     // chapter-info, which this source no longer calls at all.
-    if (!chapterPages.has(chapter.chapterId)) {
-      await this.getChapters({ mangaId } as SourceManga);
+    if (!chapterFacts.has(chapter.chapterId)) {
+      await this.rawChapters(mangaId);
     }
 
-    if (!seriesFormat.has(mangaId)) {
+    if (!seriesFacts.has(mangaId)) {
       const series = await this.request<KavitaSeries>(
         `/api/Series/${encodeURIComponent(mangaId)}`,
         { server, token },
       );
 
-      seriesFormat.set(mangaId, series?.format ?? FORMAT_ARCHIVE);
+      seriesFacts.set(mangaId, {
+        format: series?.format ?? FORMAT_ARCHIVE,
+        libraryId: series?.libraryId ?? 0,
+      });
     }
 
-    const format = seriesFormat.get(mangaId) ?? FORMAT_ARCHIVE;
+    const format = seriesFacts.get(mangaId)?.format ?? FORMAT_ARCHIVE;
 
     if (format === FORMAT_EPUB || format === FORMAT_PDF) {
       throw new Error(
@@ -398,7 +441,7 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
       );
     }
 
-    const total = chapterPages.get(chapter.chapterId) ?? 0;
+    const total = chapterFacts.get(chapter.chapterId)?.pages ?? 0;
 
     if (total <= 0) {
       throw new Error("Kavita reports no pages for this chapter.");
@@ -410,6 +453,90 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
     }
 
     return { id: chapter.chapterId, mangaId: chapter.sourceManga.mangaId, pages };
+  }
+
+  /**
+   * How far the reader has got, according to the server.
+   *
+   * Kavita records progress per chapter, so the furthest chapter it has any
+   * progress for is the one to report. A series nobody has opened has none,
+   * which is not an error - it is the ordinary state of most of a library.
+   */
+  async getMangaProgress(sourceManga: SourceManga): Promise<MangaProgress | undefined> {
+    try {
+      const rows = await this.rawChapters(sourceManga.mangaId);
+      const read = rows.filter((row) => (row.pagesRead ?? 0) > 0);
+
+      if (read.length === 0) {
+        return undefined;
+      }
+
+      const furthest = read.reduce((best, row) =>
+        (row.sortOrder ?? row.minNumber ?? 0) > (best.sortOrder ?? best.minNumber ?? 0)
+          ? row
+          : best,
+      );
+
+      return { sourceManga, lastReadChapter: this.toChapter(furthest, sourceManga) };
+    } catch {
+      // Progress is something the app asks about in passing, so a server that
+      // cannot answer should leave the rest of the source working.
+      return undefined;
+    }
+  }
+
+  /**
+   * Tells the server what has been read.
+   *
+   * This is what keeps On Deck honest: Kavita decides what to put there from
+   * what it has been told is read, so a chapter finished in the app has to be
+   * sent back or the shelf never moves.
+   *
+   * Every action is answered for individually. The app retries what failed, so
+   * reporting a whole batch as lost because one chapter was refused would mean
+   * sending the rest a second time.
+   */
+  async processChapterReadActionQueue(
+    actions: TrackedMangaChapterReadAction[],
+  ): Promise<ChapterReadActionQueueProcessingResult> {
+    const successfulItems: string[] = [];
+    const failedItems: string[] = [];
+
+    for (const action of actions) {
+      try {
+        const { server, token } = await this.signedIn();
+
+        await this.request(
+          "/api/Reader/mark-chapter-read",
+          { server, token },
+          {
+            seriesId: Number(action.chapterMangaId),
+            chapterId: Number(action.chapterId),
+          },
+        );
+
+        successfulItems.push(action.id);
+      } catch {
+        failedItems.push(action.id);
+      }
+    }
+
+    return { successfulItems, failedItems };
+  }
+
+  async getMangaProgressManagementForm(sourceManga: SourceManga): Promise<Form> {
+    const seriesId = Number(sourceManga.mangaId);
+    const title = (sourceManga.mangaInfo?.primaryTitle ?? "").trim() || `Series ${seriesId}`;
+    const tell = async (path: string): Promise<void> => {
+      const { server, token } = await this.signedIn();
+
+      await this.request(path, { server, token }, { seriesId });
+    };
+
+    return new KavitaProgressForm(title, {
+      markRead: () => tell("/api/Reader/mark-read"),
+      markUnread: () => tell("/api/Reader/mark-unread"),
+    });
   }
 
   async getSearchResults(

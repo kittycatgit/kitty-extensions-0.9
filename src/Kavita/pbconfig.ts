@@ -7,13 +7,14 @@ import { ContentRating, SourceIntents } from "@paperback/types";
 export default {
   name: "Kavita",
   description:
-    "Reads a Kavita server you host yourself. Set its address and your API key in this source's settings.",
-  version: "7.0.0",
+    "Reads a Kavita server you host yourself, and tells it what you have read. Set its address and how to sign in in this source's settings.",
+  version: "10.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.EVERYONE,
   capabilities: [
     SourceIntents.CHAPTER_PROVIDING,
+    SourceIntents.PROGRESS_PROVIDING,
     SourceIntents.SEARCH_RESULT_PROVIDING,
     SourceIntents.DISCOVER_SECTION_PROVIDING,
     SourceIntents.SETTINGS_FORM_PROVIDING,
