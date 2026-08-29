@@ -60,7 +60,7 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
 
   private readonly interceptor = new MangaHubInterceptor("main");
 
-  private readonly api = new MangaHubApi(() => this.interceptor.accessToken);
+  private readonly api = new MangaHubApi();
 
   async initialise(): Promise<void> {
     this.cookieStorage.registerInterceptor();

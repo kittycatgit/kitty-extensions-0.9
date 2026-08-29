@@ -24,27 +24,6 @@ export class MangaHubInterceptor extends PaperbackInterceptor {
       stored && typeof stored === "object" ? { ...(stored as Record<string, string>) } : {};
   }
 
-  /**
-   * The value sent as `x-mhub-access`.
-   *
-   * The site mirrors its own `mhub_access` cookie into that header. The API
-   * only checks that the header is present, not what it holds, so a locally
-   * generated value works until the site issues a real one — which keeps the
-   * reader working without a token baked into the build.
-   */
-  get accessToken(): string {
-    const issued = this.session[ACCESS_COOKIE];
-    if (issued) {
-      return issued;
-    }
-
-    const generated = Application.crypto_md5Hash(`mangahub-${Date.now()}`);
-    this.session[ACCESS_COOKIE] = generated;
-    Application.setState({ ...this.session }, ACCESS_STATE_KEY);
-
-    return generated;
-  }
-
   override async interceptRequest(request: Request): Promise<Request> {
     const isImage = /mghcdn\.com/i.test(request.url) && !/api\./i.test(request.url);
 
@@ -57,7 +36,11 @@ export class MangaHubInterceptor extends PaperbackInterceptor {
     };
 
     if (!isImage) {
-      request.cookies = { ...request.cookies, ...this.session };
+      // The access token is deliberately left out: it is minted per request by
+      // the API client, and replaying a stored one is what exhausted it.
+      const { [ACCESS_COOKIE]: _spent, ...carried } = this.session;
+
+      request.cookies = { ...request.cookies, ...carried };
     }
 
     return request;

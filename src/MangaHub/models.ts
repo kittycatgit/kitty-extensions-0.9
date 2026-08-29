@@ -113,7 +113,8 @@ export const LATEST_PAGE_SIZE = 30;
 
 export const GENRE_CACHE_TTL = 24 * 60 * 60 * 1000;
 export const GENRE_STATE_KEY = "mangahub.genres";
-export const ACCESS_STATE_KEY = "mangahub.access";
+/** Bumped when older builds cached a token the site never issued. */
+export const ACCESS_STATE_KEY = "mangahub.access2";
 
 export const POPULAR_UPDATES_SECTION_ID = "popular-updates";
 export const LATEST_SECTION_ID = "latest-updates";
