@@ -1,5 +1,5 @@
 {
-  "buildTime": "2026-08-29T01:44:25.297Z",
+  "buildTime": "2026-08-29T03:59:38.791Z",
   "builtWith": {
     "toolchain": "1.0.0-alpha.92",
     "types": "1.0.0-alpha.92"
@@ -53,6 +53,29 @@
         16
       ],
       "id": "HiperDex"
+    },
+    {
+      "name": "Kavita",
+      "description": "Reads a Kavita server you host yourself. Set its address and your API key in this source's settings.",
+      "version": "6.0.0",
+      "icon": "icon.png",
+      "language": "en",
+      "contentRating": "SAFE",
+      "capabilities": [
+        1,
+        64,
+        4,
+        32
+      ],
+      "badges": [],
+      "developers": [
+        {
+          "name": "kittycatgit",
+          "website": "https://github.com/kittycatgit",
+          "github": "https://github.com/kittycatgit"
+        }
+      ],
+      "id": "Kavita"
     },
     {
       "name": "Kayn Scan",
