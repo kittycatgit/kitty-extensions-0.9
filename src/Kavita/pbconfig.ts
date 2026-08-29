@@ -8,7 +8,7 @@ export default {
   name: "Kavita",
   description:
     "Reads a Kavita server you host yourself. Set its address and your API key in this source's settings.",
-  version: "6.0.0",
+  version: "7.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.EVERYONE,

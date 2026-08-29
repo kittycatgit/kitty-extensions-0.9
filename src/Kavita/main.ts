@@ -62,6 +62,17 @@ interface Session {
 
 let session: Session | undefined;
 
+/**
+ * What the chapter listing already told us.
+ *
+ * Kavita's series-detail answer carries every chapter's page count, so asking
+ * chapter-info for it again is a second round trip for something already known
+ * - and on some chapters that endpoint answers 500, which took the chapter down
+ * with it. Reading a series fills these in, and opening a chapter reads them.
+ */
+const chapterPages = new Map<string, number>();
+const seriesFormat = new Map<string, number>();
+
 /** What a sign-in was made from, for noticing when it no longer matches. */
 function fingerprint(credentials: KavitaCredentials): string {
   return credentials.mode === MODE_API_KEY
@@ -256,6 +267,8 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
       { server, token },
     ).catch(() => undefined);
 
+    seriesFormat.set(mangaId, series?.format ?? FORMAT_ARCHIVE);
+
     const secondary = [series?.originalName, series?.localizedName]
       .map((value) => (value ?? "").trim())
       .filter((value) => value.length > 0 && value !== (series?.name ?? "").trim());
@@ -324,6 +337,7 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
       }
 
       seen.add(row.id);
+      chapterPages.set(String(row.id), row.pages ?? 0);
 
       // Kavita marks "this file has no chapter number of its own" with a very
       // large negative number rather than an absent one.
@@ -357,12 +371,26 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
    */
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
     const { server, imageKey, token } = await this.signedIn();
-    const info = await this.request<{ pages?: number; seriesFormat?: number }>(
-      `/api/Reader/chapter-info?chapterId=${encodeURIComponent(chapter.chapterId)}`,
-      { server, token },
-    );
+    const mangaId = chapter.sourceManga.mangaId;
 
-    const format = info?.seriesFormat ?? FORMAT_ARCHIVE;
+    // Both of these are normally already known from opening the series. A
+    // chapter reached without that - resumed from the library, say - fills them
+    // from the same endpoints the series page uses, rather than from
+    // chapter-info, which this source no longer calls at all.
+    if (!chapterPages.has(chapter.chapterId)) {
+      await this.getChapters({ mangaId } as SourceManga);
+    }
+
+    if (!seriesFormat.has(mangaId)) {
+      const series = await this.request<KavitaSeries>(
+        `/api/Series/${encodeURIComponent(mangaId)}`,
+        { server, token },
+      );
+
+      seriesFormat.set(mangaId, series?.format ?? FORMAT_ARCHIVE);
+    }
+
+    const format = seriesFormat.get(mangaId) ?? FORMAT_ARCHIVE;
 
     if (format === FORMAT_EPUB || format === FORMAT_PDF) {
       throw new Error(
@@ -370,7 +398,7 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
       );
     }
 
-    const total = info?.pages ?? 0;
+    const total = chapterPages.get(chapter.chapterId) ?? 0;
 
     if (total <= 0) {
       throw new Error("Kavita reports no pages for this chapter.");
