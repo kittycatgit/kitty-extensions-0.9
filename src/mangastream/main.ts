@@ -2,7 +2,6 @@
 /* Copyright © 2026 Inkdex */
 
 import {
-  BasicRateLimiter,
   CookieStorageInterceptor,
   DiscoverSectionType,
   URL,
@@ -114,18 +113,11 @@ export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbC
     this.configureSections();
   }
 
-  globalRateLimiter = new BasicRateLimiter("ratelimiter", {
-    numberOfRequests: 20,
-    bufferInterval: 1,
-    ignoreImages: true,
-  });
-
   cookieStorageInterceptor = new CookieStorageInterceptor({
     storage: "stateManager",
   });
 
   async initialise(): Promise<void> {
-    this.globalRateLimiter.registerInterceptor();
     this.cookieStorageInterceptor.registerInterceptor();
     this.interceptor = this.interceptor ?? new MangaStreamInterceptor("main", this.domain);
     this.interceptor.registerInterceptor();

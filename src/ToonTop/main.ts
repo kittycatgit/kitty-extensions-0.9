@@ -2,7 +2,6 @@
 /* Copyright © 2026 kittycatgit */
 
 import {
-  BasicRateLimiter,
   ContentRating,
   CookieStorageInterceptor,
   DiscoverSectionType,
@@ -41,12 +40,6 @@ import type pbconfigType from "./pbconfig";
 const DOMAIN = "https://toontop.io";
 
 class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
-  private readonly rateLimiter = new BasicRateLimiter("ratelimiter", {
-    numberOfRequests: 8,
-    bufferInterval: 1,
-    ignoreImages: true,
-  });
-
   private readonly cookieStorage = new CookieStorageInterceptor({ storage: "stateManager" });
 
   private readonly interceptor = new ToonTopInterceptor("main", DOMAIN);
@@ -61,7 +54,6 @@ class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
 
   async initialise(): Promise<void> {
     this.cookieStorage.registerInterceptor();
-    this.rateLimiter.registerInterceptor();
     this.interceptor.registerInterceptor();
   }
 

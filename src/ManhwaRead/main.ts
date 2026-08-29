@@ -2,7 +2,6 @@
 /* Copyright © 2026 kittycatgit */
 
 import {
-  BasicRateLimiter,
   CookieStorageInterceptor,
   DiscoverSectionType,
   type Chapter,
@@ -42,19 +41,12 @@ const DOMAIN = "https://manhwaread.com";
 
 class ManhwaReadExtension implements ExtensionImpl<typeof pbconfigType> {
   // Every path is behind a Cloudflare challenge, so keep the rate modest.
-  private readonly rateLimiter = new BasicRateLimiter("ratelimiter", {
-    numberOfRequests: 3,
-    bufferInterval: 1,
-    ignoreImages: true,
-  });
-
   private readonly cookieStorage = new CookieStorageInterceptor({ storage: "stateManager" });
 
   private readonly interceptor = new ManhwaReadInterceptor("main", DOMAIN);
 
   async initialise(): Promise<void> {
     this.cookieStorage.registerInterceptor();
-    this.rateLimiter.registerInterceptor();
     this.interceptor.registerInterceptor();
   }
 

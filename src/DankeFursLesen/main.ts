@@ -2,7 +2,6 @@
 /* Copyright © 2026 kittycatgit */
 
 import {
-  BasicRateLimiter,
   ContentRating,
   DiscoverSectionType,
   type Chapter,
@@ -38,19 +37,11 @@ const INDEX_TTL_MS = 5 * 60 * 1000;
 type IndexEntry = GuyaSeriesSummary & { displayTitle: string };
 
 class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
-  private readonly rateLimiter = new BasicRateLimiter("ratelimiter", {
-    numberOfRequests: 10,
-    bufferInterval: 1,
-    ignoreImages: true,
-  });
-
   private index?: { at: number; entries: IndexEntry[] };
 
   private categories = new Map<string, { at: number; slugs: string[] }>();
 
-  async initialise(): Promise<void> {
-    this.rateLimiter.registerInterceptor();
-  }
+  async initialise(): Promise<void> {}
 
   private async fetchJson<T>(path: string): Promise<T> {
     const [, buffer] = await Application.scheduleRequest({

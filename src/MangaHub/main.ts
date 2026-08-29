@@ -2,7 +2,6 @@
 /* Copyright © 2026 kittycatgit */
 
 import {
-  BasicRateLimiter,
   CookieStorageInterceptor,
   DiscoverSectionType,
   type Chapter,
@@ -57,12 +56,6 @@ const LIST_FIELDS =
   "id,rank,title,slug,status,image,latestChapter,genres,author,isSafe,isLicensed,updatedDate";
 
 class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
-  private readonly rateLimiter = new BasicRateLimiter("ratelimiter", {
-    numberOfRequests: 5,
-    bufferInterval: 1,
-    ignoreImages: true,
-  });
-
   private readonly cookieStorage = new CookieStorageInterceptor({ storage: "stateManager" });
 
   private readonly interceptor = new MangaHubInterceptor("main");
@@ -71,7 +64,6 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
 
   async initialise(): Promise<void> {
     this.cookieStorage.registerInterceptor();
-    this.rateLimiter.registerInterceptor();
     this.interceptor.registerInterceptor();
   }
 

@@ -6,7 +6,7 @@ import { ContentRating, SourceIntents, type ExtensionInfo } from "@paperback/typ
 export default {
   name: "ManhwaRead",
   description: "Extension that pulls content from manhwaread.com.",
-  version: "6.0.0",
+  version: "7.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.MATURE,

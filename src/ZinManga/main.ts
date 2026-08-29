@@ -2,7 +2,6 @@
 /* Copyright © 2026 kittycatgit */
 
 import {
-  BasicRateLimiter,
   DiscoverSectionType,
   type Chapter,
   type ChapterDetails,
@@ -43,24 +42,9 @@ const GENRES_TTL_MS = 24 * 60 * 60 * 1000;
 let genreCache: { at: number; genres: Tag[] } | undefined;
 
 class ZinMangaExtension implements ExtensionImpl<typeof pbconfig> {
-  /**
-   * Paces this source's own requests for pages of markup.
-   *
-   * Artwork is left out of it entirely. The app decides how many images to
-   * fetch and when, because it is the only part that knows which page a reader
-   * is looking at; counting them here would be this source second-guessing the
-   * scheduler that owns them.
-   */
-  private readonly rateLimiter = new BasicRateLimiter("ratelimiter", {
-    numberOfRequests: 20,
-    bufferInterval: 1,
-    ignoreImages: true,
-  });
-
   private readonly interceptor = new ZinMangaInterceptor("main");
 
   async initialise(): Promise<void> {
-    this.rateLimiter.registerInterceptor();
     this.interceptor.registerInterceptor();
   }
 

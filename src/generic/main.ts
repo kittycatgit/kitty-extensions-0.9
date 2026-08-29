@@ -2,7 +2,6 @@
 /* Copyright © 2026 Inkdex */
 
 import {
-  BasicRateLimiter,
   ContentRating,
   CookieStorageInterceptor,
   DiscoverSectionType,
@@ -179,19 +178,12 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
     this.userAgent = params.userAgent;
   }
 
-  globalRateLimiter = new BasicRateLimiter("ratelimiter", {
-    numberOfRequests: 20,
-    bufferInterval: 1,
-    ignoreImages: true,
-  });
-
   cookieStorageInterceptor = new CookieStorageInterceptor({
     storage: "stateManager",
   });
 
   async initialise(): Promise<void> {
     this.cookieStorageInterceptor.registerInterceptor();
-    this.globalRateLimiter.registerInterceptor();
     this.requestManager?.registerInterceptor();
   }
 

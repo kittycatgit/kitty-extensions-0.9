@@ -2,7 +2,6 @@
 /* Copyright © 2026 kittycatgit */
 
 import {
-  BasicRateLimiter,
   CookieStorageInterceptor,
   DiscoverSectionType,
   type Chapter,
@@ -141,12 +140,6 @@ const TOKEN_DISCOVERY_SCRIPT = `
 `;
 
 class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
-  private readonly rateLimiter = new BasicRateLimiter("ratelimiter", {
-    numberOfRequests: 5,
-    bufferInterval: 1,
-    ignoreImages: true,
-  });
-
   private readonly cookieStorage = new CookieStorageInterceptor({ storage: "stateManager" });
 
   private readonly interceptor = new HiperDexInterceptor("main", DOMAIN);
@@ -155,7 +148,6 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
 
   async initialise(): Promise<void> {
     this.cookieStorage.registerInterceptor();
-    this.rateLimiter.registerInterceptor();
     this.interceptor.registerInterceptor();
   }
 

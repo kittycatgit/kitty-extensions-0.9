@@ -2,7 +2,6 @@
 /* Copyright © 2026 kittycatgit */
 
 import {
-  BasicRateLimiter,
   CookieStorageInterceptor,
   DiscoverSectionType,
   type Chapter,
@@ -47,19 +46,12 @@ const DOMAIN = "https://manga18.club";
 class Manga18ClubExtension implements ExtensionImpl<typeof pbconfig> {
   // The site is fronted by Cloudflare and throttles bursts, so keep requests
   // modest. Images come from a separate CDN and are exempt.
-  private readonly rateLimiter = new BasicRateLimiter("ratelimiter", {
-    numberOfRequests: 5,
-    bufferInterval: 1,
-    ignoreImages: true,
-  });
-
   private readonly cookieStorage = new CookieStorageInterceptor({ storage: "stateManager" });
 
   private readonly interceptor = new Manga18Interceptor("main", DOMAIN);
 
   async initialise(): Promise<void> {
     this.cookieStorage.registerInterceptor();
-    this.rateLimiter.registerInterceptor();
     this.interceptor.registerInterceptor();
   }
 

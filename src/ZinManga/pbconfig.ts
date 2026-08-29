@@ -7,7 +7,7 @@ import { ContentRating, SourceIntents } from "@paperback/types";
 export default {
   name: "ZinManga",
   description: "Extension that pulls content from zinmanga.net.",
-  version: "26.0.0",
+  version: "27.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.MATURE,
