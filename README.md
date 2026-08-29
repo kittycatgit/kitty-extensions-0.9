@@ -13,6 +13,7 @@ Paperback 0.9 extensions I maintain.
 - [OniSaga](https://onisaga.com)
 - [ScytheScans](https://scythescans.com)
 - [ToonTop](https://toontop.io)
+- [ZinManga](https://www.zinmanga.net)
 
 ## Installation
 
