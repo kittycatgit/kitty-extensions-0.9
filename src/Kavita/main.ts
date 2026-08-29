@@ -30,6 +30,7 @@ import {
   navSource,
   navTitle,
   STREAM_PATHS,
+  storedShelves,
   streamTitle,
   seriesCoverUrl,
   type KavitaCredentials,
@@ -568,15 +569,20 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
 
   async getDiscoverSections(): Promise<DiscoverSection[]> {
     const { server, token } = await this.signedIn();
+    const showShelves = storedShelves();
     const [streams, nav] = await Promise.all([
       this.request<KavitaDashboardStream[]>("/api/Stream/dashboard?visibleOnly=true", {
         server,
         token,
       }),
-      this.request<KavitaSideNavStream[]>("/api/Stream/sidenav?visibleOnly=true", {
-        server,
-        token,
-      }),
+      // Not even asked for when the rows are off, so the lighter Home is one
+      // request lighter too.
+      showShelves
+        ? this.request<KavitaSideNavStream[]>("/api/Stream/sidenav?visibleOnly=true", {
+            server,
+            token,
+          })
+        : Promise.resolve([]),
     ]);
 
     const dashboard = (streams ?? [])
@@ -590,7 +596,9 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
       }));
 
     // The side nav is the rest of the reader's arrangement - their libraries,
-    // everything they own, what they mean to read next.
+    // everything they own, what they mean to read next. Every one of them is a
+    // page of series fetched the moment Home is opened, so they are shown only
+    // when asked for.
     const shelves = (nav ?? [])
       .filter((stream) => stream.visible !== false)
       .filter((stream) => navSource(stream.streamType ?? 0, stream.libraryId) !== undefined)

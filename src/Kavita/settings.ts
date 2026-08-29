@@ -8,6 +8,7 @@ import {
   LabelRow,
   Section,
   SelectRow,
+  ToggleRow,
   type FormSectionElement,
 } from "@paperback/types";
 
@@ -17,6 +18,8 @@ import {
   MODE_KEY,
   MODE_PASSWORD,
   normaliseServer,
+  SHELVES_KEY,
+  storedShelves,
   PASS_KEY,
   SERVER_KEY,
   storedApiKey,
@@ -68,6 +71,8 @@ export class KavitaSettings extends Form {
 
   private apiKey: string;
 
+  private shelves: boolean;
+
   private status = "";
 
   private ok = false;
@@ -82,6 +87,7 @@ export class KavitaSettings extends Form {
     this.username = storedUsername();
     this.password = storedPassword();
     this.apiKey = storedApiKey();
+    this.shelves = storedShelves();
   }
 
   override getSections(): FormSectionElement<unknown>[] {
@@ -148,6 +154,22 @@ export class KavitaSettings extends Form {
               onValueChange: Application.Selector(this as KavitaSettings, "passwordChanged"),
             }),
           ]),
+      Section(
+        {
+          id: "home",
+          header: "Home screen",
+          footer:
+            "Kavita's own home page shows three rows; the rest of its side nav is links you click. Showing them here means every one is fetched each time Home opens, which on a large library is what makes it slow to scroll.",
+        },
+        [
+          ToggleRow("shelves", {
+            title: "Also show side nav rows",
+            subtitle: "All Series, Want To Read and one row per library",
+            value: this.shelves,
+            onValueChange: Application.Selector(this as KavitaSettings, "shelvesChanged"),
+          }),
+        ],
+      ),
       Section({ id: "check", footer: this.status || undefined }, [
         ButtonRow("test", {
           title: "Test connection",
@@ -186,6 +208,11 @@ export class KavitaSettings extends Form {
     this.status = "";
     Application.setState(this.mode, MODE_KEY);
     this.reloadForm();
+  }
+
+  async shelvesChanged(value: boolean): Promise<void> {
+    this.shelves = value;
+    Application.setState(value, SHELVES_KEY);
   }
 
   async usernameChanged(value: string): Promise<void> {

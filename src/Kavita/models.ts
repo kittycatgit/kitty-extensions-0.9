@@ -16,6 +16,9 @@ export const API_KEY = "kavita.apikey";
 /** Which way this source signs in. */
 export const MODE_KEY = "kavita.authmode";
 
+/** Whether the side nav's own rows are shown beside the dashboard's. */
+export const SHELVES_KEY = "kavita.shelves";
+
 /** The ways Kavita will let a source in. */
 export const MODE_PASSWORD = "password";
 export const MODE_API_KEY = "apikey";
@@ -46,6 +49,22 @@ export function storedApiKey(): string {
   const value = Application.getSecureState(API_KEY);
 
   return typeof value === "string" ? value : "";
+}
+
+/**
+ * Whether to show the rows that come from the side nav.
+ *
+ * Kavita's home page loads three rows; the rest of the side nav is a set of
+ * links a reader clicks. Turning each of those into a row here means the home
+ * screen fetches every one of them at once - a server with several libraries
+ * answers a full page of series for each, every time Home is opened, which is
+ * what makes scrolling it feel heavy.
+ *
+ * So they are off unless asked for. Nothing is hidden by accident: the setting
+ * says what it costs, and the dashboard rows are unaffected either way.
+ */
+export function storedShelves(): boolean {
+  return Application.getState(SHELVES_KEY) === true;
 }
 
 /**
