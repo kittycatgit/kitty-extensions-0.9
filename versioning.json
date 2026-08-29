@@ -1,5 +1,5 @@
 {
-  "buildTime": "2026-08-29T15:19:12.361Z",
+  "buildTime": "2026-08-29T23:19:21.224Z",
   "builtWith": {
     "toolchain": "1.0.0-alpha.92",
     "types": "1.0.0-alpha.92"
@@ -12,7 +12,7 @@
     {
       "name": "DankeFursLesen",
       "description": "Extension that pulls content from danke.moe.",
-      "version": "2.0.0",
+      "version": "3.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "MATURE",
@@ -34,7 +34,7 @@
     {
       "name": "HiperDex",
       "description": "Extension that pulls content from hiperdex.tv.",
-      "version": "5.0.0",
+      "version": "6.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "ADULT",
@@ -57,7 +57,7 @@
     {
       "name": "Kavita",
       "description": "Reads a Kavita server you host yourself, and tells it what you have read. Set its address and how to sign in in this source's settings.",
-      "version": "12.0.0",
+      "version": "13.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "SAFE",
@@ -104,7 +104,7 @@
     {
       "name": "Manga18Club",
       "description": "Extension that pulls content from manga18.club.",
-      "version": "3.0.0",
+      "version": "4.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "ADULT",
@@ -126,7 +126,7 @@
     {
       "name": "MangaHub",
       "description": "Extension that pulls content from mangahub.io.",
-      "version": "3.0.0",
+      "version": "4.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "ADULT",
@@ -149,7 +149,7 @@
     {
       "name": "ManhwaRead",
       "description": "Extension that pulls content from manhwaread.com.",
-      "version": "6.0.0",
+      "version": "7.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "MATURE",
@@ -172,7 +172,7 @@
     {
       "name": "ManhwaToon",
       "description": "Extension that pulls content from manhwatoon.me.",
-      "version": "2.0.0",
+      "version": "3.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "ADULT",
@@ -219,7 +219,7 @@
     {
       "name": "ScytheScans",
       "description": "Extension that pulls content from scythescans.com.",
-      "version": "9.0.0",
+      "version": "10.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "MATURE",
@@ -266,7 +266,7 @@
     {
       "name": "ToonTop",
       "description": "Extension that pulls content from toontop.io.",
-      "version": "2.0.0",
+      "version": "3.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "MATURE",
@@ -289,7 +289,7 @@
     {
       "name": "ZinManga",
       "description": "Extension that pulls content from zinmanga.net.",
-      "version": "26.0.0",
+      "version": "27.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "MATURE",
