@@ -8,7 +8,7 @@ export default {
   name: "Kavita",
   description:
     "Reads a Kavita server you host yourself, and tells it what you have read. Set its address and how to sign in in this source's settings.",
-  version: "13.0.0",
+  version: "14.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.EVERYONE,

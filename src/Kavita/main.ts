@@ -563,22 +563,45 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
   ): Promise<ChapterReadActionQueueProcessingResult> {
     const successfulItems: string[] = [];
     const failedItems: string[] = [];
+    const bySeries = new Map<string, KavitaChapter[]>();
 
     for (const action of actions) {
+      // The tracked title's own id, not the id of whichever source the chapter
+      // was read from - `chapterMangaId` would be that other source's.
+      const seriesId = action.sourceManga.mangaId;
+
       try {
+        if (!bySeries.has(seriesId)) {
+          bySeries.set(seriesId, await this.rawChapters(seriesId));
+        }
+
+        const rows = bySeries.get(seriesId) ?? [];
+
+        // Read from this server, the action's chapter id is one of these. Added
+        // as a second source to a title read somewhere else, that id belongs to
+        // the other source and means nothing here - so the chapter number,
+        // which does carry across, finds it instead.
+        const match =
+          rows.find((row) => String(row.id) === action.chapterId) ??
+          rows.find((row) => {
+            const number = row.minNumber ?? Number(row.number ?? Number.NaN);
+
+            return Number.isFinite(number) && Math.abs(number - action.chapterNum) < 0.001;
+          });
+
+        if (!match?.id) {
+          // Nothing on this server answers to that chapter. The app counts the
+          // failure and backs off; calling it done would be a lie.
+          failedItems.push(action.id);
+          continue;
+        }
+
         const { server, token } = await this.signedIn();
 
         await this.request(
           "/api/Reader/mark-chapter-read",
           { server, token },
-          {
-            // The tracked title's own id, not the id of whichever source the
-            // chapter was read from. A title read elsewhere and tracked here
-            // still belongs to a series on this server, and `chapterMangaId`
-            // would be that other source's id.
-            seriesId: Number(action.sourceManga.mangaId),
-            chapterId: Number(action.chapterId),
-          },
+          { seriesId: Number(seriesId), chapterId: match.id },
         );
 
         successfulItems.push(action.id);
