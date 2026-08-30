@@ -28,15 +28,15 @@ export const USER_AGENT =
  * rather than being handed substitute artwork.
  */
 /**
- * How many pages of a chapter list to walk at most.
+ * How many times to press the site's own "load more chapters" at most.
  *
- * The list is paged like every other listing here, so a long series arrives a
- * hundred chapters at a time and stopping at the first page hides the rest.
- * Walking stops as soon as a page adds nothing new, which is also what happens
- * if the site ever ignores the parameter - this only bounds the pathological
- * case where every page looks different forever.
+ * A series page ships its first hundred chapters and hides the rest behind that
+ * button, so a long series looks like it simply stops. The button is a Livewire
+ * call, not a link, which is why no amount of `?page=` reaches the rest.
+ * Pressing stops as soon as an answer adds nothing new; this only bounds the
+ * pathological case where it never stops giving.
  */
-export const MAX_CHAPTER_PAGES = 30;
+export const MAX_CHAPTER_LOADS = 30;
 
 export const FALLBACK_COVER = `${DOMAIN}/_no-cover.png`;
 

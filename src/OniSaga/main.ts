@@ -26,7 +26,7 @@ import {
   CHAPTER_CACHE_TTL_MS,
   DOMAIN,
   HOME_SECTIONS,
-  MAX_CHAPTER_PAGES,
+  MAX_CHAPTER_LOADS,
   USER_AGENT,
   WEBVIEW_BUDGET_MS,
   WEBVIEW_MAX_CONCURRENCY,
@@ -169,26 +169,70 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
   }
 
   /**
-   * Every chapter of a series, not just the first page of them.
+   * One press of the site's "load more chapters", or nothing if it gave none.
    *
-   * The site pages a chapter list the same way it pages its catalogue, with
-   * `?page=`, and reading only the first page is why long series appeared to
-   * stop dead around a hundred chapters while the site itself had hundreds
-   * more. Pages are walked until one adds nothing new - which is the same thing
-   * that happens if a page parameter is ever ignored, so a short series costs
-   * one extra request and never loops.
+   * The chapter list is a Livewire component and the button calls a method on
+   * it, so the rest of a long series is reached the same way the site reaches
+   * it. Each answer carries the whole list so far and a fresh snapshot, which
+   * the next press has to be made with.
+   */
+  private async pressLoadMore(
+    snapshot: string,
+    token: string,
+    referer: string,
+  ): Promise<{ html: string; snapshot: string } | undefined> {
+    const [, buffer] = await Application.scheduleRequest({
+      url: `${DOMAIN}/livewire/update`,
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "X-Livewire": "true",
+        ...(token ? { "X-CSRF-TOKEN": token } : {}),
+        referer,
+      },
+      body: JSON.stringify({
+        _token: token,
+        components: [
+          {
+            snapshot,
+            updates: {},
+            calls: [{ path: "", method: "loadMoreChapters", params: [] }],
+          },
+        ],
+      }),
+    });
+
+    try {
+      const payload = JSON.parse(Application.arrayBufferToUTF8String(buffer)) as {
+        components?: { snapshot?: string; effects?: { html?: string } }[];
+      };
+      const component = payload.components?.[0];
+      const html = component?.effects?.html ?? "";
+
+      return html ? { html, snapshot: component?.snapshot ?? snapshot } : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Every chapter of a series, not only the first hundred.
+   *
+   * The page ships a hundred and hides the rest behind a button, so reading the
+   * page alone is why long series appeared to stop dead while the site had
+   * hundreds more. The button is pressed here the same way a reader presses it,
+   * until an answer adds nothing new.
    */
   async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
+    const path = `/manga/${sourceManga.mangaId}`;
+    const $ = await this.fetch(path);
     const collected: Chapter[] = [];
     const seen = new Set<string>();
 
-    for (let page = 1; page <= MAX_CHAPTER_PAGES; page++) {
-      const path =
-        page > 1 ? `/manga/${sourceManga.mangaId}?page=${page}` : `/manga/${sourceManga.mangaId}`;
-      const $ = await this.fetch(path);
+    const take = (page: cheerio.CheerioAPI): number => {
       let added = 0;
 
-      for (const chapter of parseChapters($, sourceManga)) {
+      for (const chapter of parseChapters(page, sourceManga)) {
         if (seen.has(chapter.chapterId)) {
           continue;
         }
@@ -198,13 +242,39 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
         added += 1;
       }
 
-      if (added === 0) {
+      return added;
+    };
+
+    take($);
+
+    const token = $('meta[name="csrf-token"]').attr("content") ?? "";
+    let snapshot = "";
+
+    for (const element of $("[wire\\:snapshot]").toArray()) {
+      const node = $(element);
+
+      if (node.find('button[wire\\:click="loadMoreChapters"]').length > 0) {
+        snapshot = node.attr("wire:snapshot") ?? "";
         break;
       }
     }
 
-    // Ordering is decided once over everything found, rather than per page, so
-    // a chapter's place reflects the whole series.
+    for (let press = 0; snapshot && press < MAX_CHAPTER_LOADS; press++) {
+      const step = await this.pressLoadMore(snapshot, token, `${DOMAIN}${path}`);
+
+      if (!step) {
+        break;
+      }
+
+      snapshot = step.snapshot;
+
+      if (take(cheerio.load(step.html)) === 0) {
+        break;
+      }
+    }
+
+    // Ordering is decided once over everything found, so a chapter's place
+    // reflects the whole series rather than the batch it arrived in.
     const sorted = collected.sort((left, right) => right.chapNum - left.chapNum);
     const chapters = sorted.map((chapter, index) => ({
       ...chapter,
