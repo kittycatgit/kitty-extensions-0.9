@@ -67,24 +67,18 @@ function freeOn(iso: string | null | undefined): string {
   return `${when.getDate()} ${MONTHS[when.getMonth()] ?? ""}`;
 }
 
-/** How a paid chapter is described: what it costs, and when it stops costing. */
-function lockedTitle(
-  number: string,
-  row: { coinPrice?: number; becomesFreeAt?: string | null },
-): string {
-  const parts = ["locked"];
-
-  if (row.coinPrice) {
-    parts.push(`${row.coinPrice} coins`);
-  }
-
+/**
+ * How a paid chapter is marked.
+ *
+ * The app already prints "Ch. 21 - " before this, and the row it prints into is
+ * narrow, so the number is not repeated and the price is left out: what a reader
+ * scanning the list wants to know is that it is shut and when it opens. A lock
+ * reads at a glance where the word would not fit.
+ */
+function lockedTitle(row: { becomesFreeAt?: string | null }): string {
   const free = freeOn(row.becomesFreeAt);
 
-  if (free) {
-    parts.push(`unlocks ${free}`);
-  }
-
-  return `Chapter ${number} (${parts.join(" · ")})`;
+  return free ? `\u{1F512} ${free}` : "\u{1F512}";
 }
 
 class KaynScanExtension implements ExtensionImpl<typeof pbconfig> {
@@ -285,7 +279,7 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfig> {
         // site also shows a date these unlock on; that is worked out in its own
         // page script and appears nowhere in the data this can read, so it is
         // not invented here.
-        ...(row.isLocked ? { title: lockedTitle(number, row) } : {}),
+        ...(row.isLocked ? { title: lockedTitle(row) } : {}),
       });
     }
 
