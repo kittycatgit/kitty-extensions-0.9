@@ -26,6 +26,7 @@ import {
   CHAPTER_CACHE_TTL_MS,
   DOMAIN,
   HOME_SECTIONS,
+  MAX_CHAPTER_PAGES,
   USER_AGENT,
   WEBVIEW_BUDGET_MS,
   WEBVIEW_MAX_CONCURRENCY,
@@ -167,9 +168,48 @@ class OniSagaExtension implements ExtensionImpl<typeof pbconfigType> {
     Application.setState(index, CHAPTER_ORDER_INDEX_KEY);
   }
 
+  /**
+   * Every chapter of a series, not just the first page of them.
+   *
+   * The site pages a chapter list the same way it pages its catalogue, with
+   * `?page=`, and reading only the first page is why long series appeared to
+   * stop dead around a hundred chapters while the site itself had hundreds
+   * more. Pages are walked until one adds nothing new - which is the same thing
+   * that happens if a page parameter is ever ignored, so a short series costs
+   * one extra request and never loops.
+   */
   async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
-    const $ = await this.fetch(`/manga/${sourceManga.mangaId}`);
-    const chapters = parseChapters($, sourceManga);
+    const collected: Chapter[] = [];
+    const seen = new Set<string>();
+
+    for (let page = 1; page <= MAX_CHAPTER_PAGES; page++) {
+      const path =
+        page > 1 ? `/manga/${sourceManga.mangaId}?page=${page}` : `/manga/${sourceManga.mangaId}`;
+      const $ = await this.fetch(path);
+      let added = 0;
+
+      for (const chapter of parseChapters($, sourceManga)) {
+        if (seen.has(chapter.chapterId)) {
+          continue;
+        }
+
+        seen.add(chapter.chapterId);
+        collected.push(chapter);
+        added += 1;
+      }
+
+      if (added === 0) {
+        break;
+      }
+    }
+
+    // Ordering is decided once over everything found, rather than per page, so
+    // a chapter's place reflects the whole series.
+    const sorted = collected.sort((left, right) => right.chapNum - left.chapNum);
+    const chapters = sorted.map((chapter, index) => ({
+      ...chapter,
+      sortingIndex: sorted.length - index,
+    }));
 
     this.rememberOrder(sourceManga.mangaId, chapters);
 

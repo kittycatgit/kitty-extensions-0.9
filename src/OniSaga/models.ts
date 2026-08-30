@@ -27,6 +27,17 @@ export const USER_AGENT =
  * URL that holds no image, so the app falls through to its own placeholder
  * rather than being handed substitute artwork.
  */
+/**
+ * How many pages of a chapter list to walk at most.
+ *
+ * The list is paged like every other listing here, so a long series arrives a
+ * hundred chapters at a time and stopping at the first page hides the rest.
+ * Walking stops as soon as a page adds nothing new, which is also what happens
+ * if the site ever ignores the parameter - this only bounds the pathological
+ * case where every page looks different forever.
+ */
+export const MAX_CHAPTER_PAGES = 30;
+
 export const FALLBACK_COVER = `${DOMAIN}/_no-cover.png`;
 
 /** Paging and filter state carried between pages of results. */

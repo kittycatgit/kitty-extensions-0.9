@@ -6,7 +6,7 @@ import { ContentRating, SourceIntents, type ExtensionInfo } from "@paperback/typ
 export default {
   name: "OniSaga",
   description: "Extension that pulls content from onisaga.com.",
-  version: "36.0.0",
+  version: "37.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.MATURE,
