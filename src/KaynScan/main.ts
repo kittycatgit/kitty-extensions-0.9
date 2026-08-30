@@ -2,7 +2,6 @@
 /* Copyright © 2026 kittycatgit */
 
 import {
-  CookieStorageInterceptor,
   DiscoverSectionType,
   type Chapter,
   type ChapterDetails,
@@ -18,279 +17,86 @@ import {
   type SortingOption,
   type SourceManga,
 } from "@paperback/types";
-import * as cheerio from "cheerio";
 
-import { KaynScanSearchForm } from "./forms";
+import { KaynSearchForm } from "./forms";
 import {
   API,
-  CHAPTER_BATCH,
+  assetUrl,
+  chapterUrl,
   DEFAULT_SORT,
-  GENRES_SECTION_ID,
   HOME_SECTIONS,
-  HOME_TTL_MS,
-  COMPLETED_SECTION_ID,
-  MOST_POPULAR_SECTION_ID,
-  NEW_SECTION_ID,
-  NOVELS_SECTION_ID,
-  PAGE_SIZE,
-  POPULAR_ORDER,
-  POPULAR_SECTION_ID,
-  POSTS_URL,
-  RELEASES_SECTION_ID,
-  ROW_CAP,
-  ROW_PAGE,
+  listingUrl,
+  ROW_LIMIT,
+  seriesUrl,
   SORTS,
-  chapterApiUrl,
-  fromId,
-  type ApiChapter,
-  type ApiChapterDetail,
-  type GenreChoice,
-  type ApiListing,
-  type ApiPosts,
-  type ApiSeries,
+  type KaynGenre,
+  type KaynListing,
   type KaynSearchMetadata,
+  type KaynSeries,
 } from "./models";
-import { KaynScanInterceptor } from "./network";
-import {
-  toHomeRows,
-  toChapters,
-  toNovelHtml,
-  toPages,
-  toSearchResult,
-  toSourceManga,
-  type HomeRows,
-} from "./parsers";
-import type pbconfigType from "./pbconfig";
+import { KaynInterceptor } from "./network";
+import { parseBook, parseChapters, parsePages } from "./parsers";
+import pbconfig from "./pbconfig";
 
 /**
- * The derived home rows, kept in memory rather than in stored state.
+ * Which chapters have to be paid for.
  *
- * Stored state refuses anything over 128 KB, and eight rows of cards are well
- * past that - which is why every row came back reporting the limit instead of
- * any titles. Module scope lives as long as the extension does, which is all a
- * cache of this kind needs; if it is ever torn down, the catalogue is simply
- * asked for again.
+ * Learned while listing a series and read when one is opened, so a locked
+ * chapter can be refused by name instead of looking like an empty one.
  */
-let homeCache: { rows: HomeRows; at: number } | undefined;
+const lockedChapters = new Set<string>();
 
-class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
-  private readonly cookieStorage = new CookieStorageInterceptor({ storage: "stateManager" });
+const lockKey = (slug: string, number: string): string => `${slug}#${number}`;
 
-  private readonly interceptor = new KaynScanInterceptor("main");
+class KaynScanExtension implements ExtensionImpl<typeof pbconfig> {
+  private readonly interceptor = new KaynInterceptor("main");
 
   async initialise(): Promise<void> {
-    this.cookieStorage.registerInterceptor();
     this.interceptor.registerInterceptor();
+  }
+
+  async cloudflareBypassCompleted(_request: Request, _cookies: Cookie[]): Promise<void> {
+    // The app keeps the cookies its bypass collected; nothing to store here.
   }
 
   private async json<T>(url: string): Promise<T> {
     const [, buffer] = await Application.scheduleRequest({ url, method: "GET" });
+
     return JSON.parse(Application.arrayBufferToUTF8String(buffer)) as T;
   }
 
-  private async html(url: string): Promise<cheerio.CheerioAPI> {
+  private async text(url: string): Promise<string> {
     const [, buffer] = await Application.scheduleRequest({ url, method: "GET" });
-    return cheerio.load(Application.arrayBufferToUTF8String(buffer));
+
+    return Application.arrayBufferToUTF8String(buffer);
   }
 
-  /**
-   * Asks the listing endpoint for a page of titles.
-   *
-   * The same endpoint answers browsing, searching and every filter, so one
-   * place builds the query for all of them.
-   */
-  private listingUrl(page: number, filters: KaynSearchMetadata, title?: string): string {
-    const parts = [`perPage=${PAGE_SIZE}`, `page=${page}`];
-
-    if (title?.trim()) {
-      parts.push(`searchTerm=${encodeURIComponent(title.trim())}`);
-    }
-
-    // Any value at all selects the site's other ordering, so only the popular
-    // one is sent; its default already leads with what was updated last.
-    if (filters.sort && filters.sort !== DEFAULT_SORT) {
-      parts.push(`orderBy=${encodeURIComponent(POPULAR_ORDER)}`);
-    }
-
-    if (filters.status) {
-      parts.push(`seriesStatus=${encodeURIComponent(filters.status)}`);
-    }
-
-    if (filters.type) {
-      parts.push(`seriesType=${encodeURIComponent(filters.type)}`);
-    }
-
-    // The endpoint takes several ids at once, comma separated, and answers with
-    // everything wearing any of them - which is how one genre the site happens
-    // to file under three ids is asked about in a single question.
-    if (filters.genreIds?.length) {
-      const ids = filters.genreIds
-        .flatMap((id) => String(id).split("+"))
-        .filter((id) => /^\d+$/.test(id));
-
-      if (ids.length) {
-        parts.push(`genreIds=${ids.join(",")}`);
-      }
-    }
-
-    return `${API}/query?${parts.join("&")}`;
-  }
-
-  private async listing(
-    page: number,
-    filters: KaynSearchMetadata,
-    title?: string,
-  ): Promise<{ posts: ApiSeries[]; total: number }> {
-    const data = await this.json<ApiListing>(this.listingUrl(page, filters, title));
-    return { posts: data.posts ?? [], total: data.totalCount ?? 0 };
-  }
-
-  /**
-   * The whole catalogue, as the site's own front page asks for it.
-   *
-   * Every row is cut from this one reply, so it is asked for once and kept a
-   * short while; fetching per row would pull the same half a megabyte six times
-   * over. What is kept is only what the rows need, not the reply itself.
-   */
-  private async home(): Promise<HomeRows> {
-    if (homeCache && Date.now() - homeCache.at < HOME_TTL_MS) {
-      return homeCache.rows;
-    }
-
-    const payload = await this.json<ApiPosts>(POSTS_URL);
-    const rows = toHomeRows(payload, ROW_CAP);
-
-    homeCache = { rows, at: Date.now() };
-    return rows;
-  }
-
-  /** The genres actually worn by something in the catalogue, so each one leads
-   * somewhere. They come from the same reply the rows do. */
-  private async genres(): Promise<GenreChoice[]> {
-    const rows = await this.home();
-    return rows.genres;
-  }
-
-  async getMangaDetails(mangaId: string): Promise<SourceManga> {
-    const data = await this.json<{ post?: ApiSeries }>(
-      `${API}/post?postSlug=${encodeURIComponent(fromId(mangaId))}`,
-    );
-    const post = data.post;
-
-    if (!post) {
-      throw new Error(`${mangaId} could not be found on the site.`);
-    }
-
-    return toSourceManga(cheerio.load("<div></div>"), post, mangaId);
-  }
-
-  async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
-    const details = await this.json<{ post?: ApiSeries }>(
-      `${API}/post?postSlug=${encodeURIComponent(fromId(sourceManga.mangaId))}`,
-    );
-    const postId = details.post?.id;
-
-    if (postId === undefined) {
-      throw new Error(`${sourceManga.mangaId} could not be found on the site.`);
-    }
-
-    // The endpoint answers a window at a time, so it is asked until it stops
-    // handing anything back - a long series is thousands of chapters.
-    const rows: ApiChapter[] = [];
-
-    for (let skip = 0; ; skip += CHAPTER_BATCH) {
-      const batch = await this.json<{ post?: { chapters?: ApiChapter[] } }>(
-        `${API}/chapters?postId=${encodeURIComponent(String(postId))}&take=${CHAPTER_BATCH}&skip=${skip}`,
-      );
-      const chapters = batch.post?.chapters ?? [];
-
-      rows.push(...chapters);
-
-      if (chapters.length < CHAPTER_BATCH) {
-        break;
-      }
-    }
-
-    return toChapters(rows, sourceManga);
-  }
-
-  /**
-   * A chapter, whichever kind it is.
-   *
-   * One route answers for both: a comic comes back as an ordered list of
-   * images, a novel as its text, and the same reply says whether the reader is
-   * allowed it at all.
-   */
-  async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
-    const mangaId = chapter.sourceManga.mangaId;
-    const data = await this.json<{ chapter?: ApiChapterDetail } & ApiChapterDetail>(
-      chapterApiUrl(chapter.chapterId),
-    );
-    const detail = data.chapter ?? data;
-
-    if (detail.isLocked === true || detail.isAccessible === false) {
-      throw new Error(
-        "This chapter is still locked on the site - it unlocks on a timer, or with coins.",
-      );
-    }
-
-    const pages = toPages(detail);
-
-    if (pages.length > 0) {
-      return { id: chapter.chapterId, mangaId, pages };
-    }
-
-    const html = toNovelHtml(cheerio.load("<div></div>"), detail);
-
-    if (html.length > 0) {
-      return { id: chapter.chapterId, mangaId, type: "html", html };
-    }
-
-    throw new Error(
-      `Chapter ${chapter.chapterId} has nothing to show yet. The site may still be preparing it.`,
-    );
-  }
-
-  async getAdvancedSearchForm(query: SearchQuery<Metadata>): Promise<KaynScanSearchForm> {
-    return new KaynScanSearchForm(
-      query.metadata as KaynSearchMetadata | undefined,
-      await this.genres(),
-    );
-  }
-
-  async getSortingOptions(): Promise<SortingOption[]> {
-    return SORTS;
-  }
-
-  async getSearchResults(
-    query: SearchQuery<Metadata>,
-    metadata: Metadata | undefined,
-    sortingOption?: SortingOption,
-  ): Promise<PagedResults<SearchResultItem>> {
-    const paging = metadata as KaynSearchMetadata | undefined;
-
-    if (paging?.completed) {
-      return { items: [] };
-    }
-
-    const filters: KaynSearchMetadata = {
-      ...(query.metadata as KaynSearchMetadata | undefined),
-      ...paging,
-      ...(sortingOption?.id ? { sort: sortingOption.id } : {}),
-    };
-
-    const page = paging?.page ?? 1;
-    const { posts, total } = await this.listing(page, filters, query.title);
-    const items = posts
-      .map((post) => toSearchResult(post))
-      .filter((item): item is SearchResultItem => item !== undefined);
+  /** A series as the app lists it. */
+  private toResult(series: KaynSeries): SearchResultItem {
+    const slug = (series.urlSlug ?? series.slug ?? "").trim();
+    const chapters = series._count?.chapters ?? 0;
+    const bits = [series.type, chapters > 0 ? `${chapters} chapters` : ""].filter(Boolean);
 
     return {
-      items,
-      metadata:
-        items.length > 0 && page * PAGE_SIZE < total
-          ? ({ ...filters, page: page + 1 } satisfies KaynSearchMetadata)
-          : { completed: true },
+      mangaId: slug,
+      title: (series.title ?? "").trim() || slug,
+      imageUrl: assetUrl(series.coverImage),
+      ...(bits.length > 0 ? { subtitle: bits.join(" · ") } : {}),
+    };
+  }
+
+  private async page(
+    url: string,
+    metadata: KaynSearchMetadata | undefined,
+  ): Promise<{ items: SearchResultItem[]; metadata: KaynSearchMetadata }> {
+    const page = metadata?.page ?? 1;
+    const listing = await this.json<KaynListing>(url);
+    const rows = listing.data ?? [];
+    const more = listing.meta?.hasMore === true;
+
+    return {
+      items: rows.map((series) => this.toResult(series)),
+      metadata: more ? { page: page + 1 } : { completed: true },
     };
   }
 
@@ -298,12 +104,7 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
     return HOME_SECTIONS.map((entry) => ({
       id: entry.id,
       title: entry.title,
-      type:
-        entry.id === GENRES_SECTION_ID
-          ? DiscoverSectionType.genres
-          : entry.id === RELEASES_SECTION_ID
-            ? DiscoverSectionType.chapterUpdates
-            : DiscoverSectionType.simpleCarousel,
+      type: DiscoverSectionType.simpleCarousel,
     }));
   }
 
@@ -317,81 +118,163 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfigType> {
       return { items: [] };
     }
 
-    const rows = await this.home();
+    const entry = HOME_SECTIONS.find((row) => row.id === section.id);
 
-    if (section.id === GENRES_SECTION_ID) {
-      return {
-        items: rows.genres.map((genre) => ({
-          type: "genresCarouselItem" as const,
-          name: genre.title,
-          searchQuery: { title: "", metadata: { genreIds: genre.ids } as Metadata },
-        })),
-        metadata: { completed: true },
-      };
+    if (!entry) {
+      throw new Error(`Invalid sectionId provided: ${section.id}`);
     }
 
-    // A row hands over a page at a time; the app asks for the next when the
-    // reader reaches the end of one.
-    const page = paging?.page ?? 0;
-    const from = page * ROW_PAGE;
-
-    // Just-posted chapters, each opening the chapter itself rather than only
-    // the series it belongs to.
-    if (section.id === RELEASES_SECTION_ID) {
-      const slice = rows.releases.slice(from, from + ROW_PAGE);
-
-      return {
-        items: slice.map((release) => ({
-          type: "chapterUpdatesCarouselItem" as const,
-          mangaId: release.mangaId,
-          chapterId: release.chapterId,
-          title: release.title,
-          imageUrl: release.imageUrl,
-          ...(release.subtitle ? { subtitle: release.subtitle } : {}),
-        })),
-        metadata:
-          from + ROW_PAGE < rows.releases.length
-            ? ({ page: page + 1 } satisfies KaynSearchMetadata)
-            : { completed: true },
-      };
-    }
-
-    const row =
-      section.id === POPULAR_SECTION_ID
-        ? rows.popular
-        : section.id === NEW_SECTION_ID
-          ? rows.fresh
-          : section.id === COMPLETED_SECTION_ID
-            ? rows.completed
-            : section.id === MOST_POPULAR_SECTION_ID
-              ? rows.mostPopular
-              : section.id === NOVELS_SECTION_ID
-                ? rows.novels
-                : rows.latest;
+    const page = paging?.page ?? 1;
+    const result = await this.page(
+      listingUrl({
+        page,
+        limit: ROW_LIMIT,
+        sort: entry.sort,
+        ...("type" in entry ? { type: entry.type } : {}),
+        ...("status" in entry ? { status: entry.status } : {}),
+      }),
+      paging,
+    );
 
     return {
-      items: row.slice(from, from + ROW_PAGE).map((item) => ({
+      items: result.items.map((item) => ({
         type: "simpleCarouselItem" as const,
         mangaId: item.mangaId,
-        title: item.title,
         imageUrl: item.imageUrl,
+        title: item.title,
         ...(item.subtitle ? { subtitle: item.subtitle } : {}),
-      })),
-      metadata:
-        from + ROW_PAGE < row.length
-          ? ({ page: page + 1 } satisfies KaynSearchMetadata)
-          : { completed: true },
+      })) as DiscoverSectionItem[],
+      metadata: result.metadata,
     };
   }
 
-  async cloudflareBypassCompleted(_request: Request, cookies: Cookie[]): Promise<void> {
-    for (const cookie of cookies) {
-      if (cookie.expires && cookie.expires.getTime() <= Date.now()) {
+  async getSortingOptions(): Promise<SortingOption[]> {
+    return SORTS;
+  }
+
+  async getAdvancedSearchForm(): Promise<KaynSearchForm> {
+    const genres = await this.json<{ genres?: KaynGenre[] }>(`${API}/genres`);
+
+    return new KaynSearchForm(genres.genres ?? []);
+  }
+
+  async getSearchResults(
+    query: SearchQuery<Metadata>,
+    metadata?: Metadata,
+    sortingOption?: SortingOption,
+  ): Promise<PagedResults<SearchResultItem>> {
+    const paging = metadata as KaynSearchMetadata | undefined;
+
+    if (paging?.completed) {
+      return { items: [] };
+    }
+
+    const filters = (query.metadata ?? {}) as {
+      genre?: string;
+      type?: string;
+      status?: string;
+    };
+
+    return this.page(
+      listingUrl({
+        page: paging?.page ?? 1,
+        limit: ROW_LIMIT,
+        q: query.title ?? "",
+        sort: sortingOption?.id ?? DEFAULT_SORT,
+        ...(filters.genre ? { genre: filters.genre } : {}),
+        ...(filters.type ? { type: filters.type } : {}),
+        ...(filters.status ? { status: filters.status } : {}),
+      }),
+      paging,
+    );
+  }
+
+  async getMangaDetails(mangaId: string): Promise<SourceManga> {
+    const book = parseBook(await this.text(seriesUrl(mangaId)));
+
+    return {
+      mangaId,
+      mangaInfo: {
+        primaryTitle: (book.title ?? "").trim() || mangaId,
+        secondaryTitles: [],
+        thumbnailUrl: assetUrl(book.image),
+        synopsis: (book.description ?? "").replace(/<[^>]+>/g, "").trim(),
+        contentRating: pbconfig.contentRating,
+        status: "Unknown",
+        shareUrl: seriesUrl(mangaId),
+        ...(book.author ? { author: book.author } : {}),
+        ...(book.rating === undefined || Number.isNaN(book.rating) ? {} : { rating: book.rating }),
+        ...(book.genres.length > 0
+          ? {
+              tagGroups: [
+                {
+                  id: "genres",
+                  title: "Genres",
+                  tags: book.genres.map((genre) => ({ id: genre.toLowerCase(), title: genre })),
+                },
+              ],
+            }
+          : {}),
+      },
+    };
+  }
+
+  async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
+    const rows = parseChapters(await this.text(seriesUrl(sourceManga.mangaId)));
+    const chapters: Chapter[] = [];
+
+    for (const row of rows) {
+      const number = String(row.number ?? "").trim();
+
+      if (!number) {
         continue;
       }
 
-      this.cookieStorage.setCookie(cookie);
+      if (row.isLocked) {
+        lockedChapters.add(lockKey(sourceManga.mangaId, number));
+      } else {
+        lockedChapters.delete(lockKey(sourceManga.mangaId, number));
+      }
+
+      chapters.push({
+        chapterId: number,
+        sourceManga,
+        langCode: "en",
+        chapNum: Number(number),
+        // A paid chapter is listed rather than hidden, so a reader can see that
+        // it exists, and says so plainly rather than opening to nothing.
+        ...(row.isLocked ? { title: `Chapter ${number} (locked)` } : {}),
+      });
     }
+
+    const sorted = chapters.sort((left, right) => right.chapNum - left.chapNum);
+
+    return sorted.map((chapter, index) => ({
+      ...chapter,
+      sortingIndex: sorted.length - index,
+    }));
+  }
+
+  async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
+    const slug = chapter.sourceManga.mangaId;
+
+    if (lockedChapters.has(lockKey(slug, chapter.chapterId))) {
+      throw new Error(
+        "This chapter is locked. The site sells it for coins, so it can only be read there, signed in to an account that has paid for it.",
+      );
+    }
+
+    const pages = parsePages(await this.text(chapterUrl(slug, chapter.chapterId))).map((path) =>
+      assetUrl(path),
+    );
+
+    if (pages.length === 0) {
+      throw new Error(
+        "No pages were found for this chapter. If the site shows it as locked, it has to be paid for there.",
+      );
+    }
+
+    return { id: chapter.chapterId, mangaId: slug, pages };
   }
 }
 

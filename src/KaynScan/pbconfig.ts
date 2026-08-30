@@ -6,8 +6,8 @@ import { ContentRating, SourceIntents } from "@paperback/types";
 
 export default {
   name: "Kayn Scan",
-  description: "Extension that pulls content from kaynscan.org.",
-  version: "11.0.0",
+  description: "Extension that pulls content from kaynscans.com.",
+  version: "12.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.MATURE,

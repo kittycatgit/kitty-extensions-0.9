@@ -11,21 +11,20 @@ import {
 import { DOMAIN, USER_AGENT } from "./models";
 
 /**
- * Headers and bot verification - nothing else.
+ * Sets the headers the site expects, and nothing else.
  *
- * The API answers plainly and its artwork is served unsigned, so there is
- * nothing here to pace or to count.
+ * Requests are not paced, retried or held here. The app owns its own queue and
+ * honours a 429 itself; a limiter on top of it only fights the scheduler that
+ * owns the requests.
  */
-export class KaynScanInterceptor extends PaperbackInterceptor {
+export class KaynInterceptor extends PaperbackInterceptor {
   override async interceptRequest(request: Request): Promise<Request> {
     request.headers = {
       ...request.headers,
       "user-agent": USER_AGENT,
-      // The API sits on a sibling host and answers for the site, so requests
-      // name the site they came from.
-      origin: DOMAIN,
       referer: `${DOMAIN}/`,
       "accept-language": "en-US,en;q=0.9",
+      ...(request.url.includes("/api/") ? { accept: "application/json" } : {}),
     };
 
     return request;
@@ -41,9 +40,9 @@ export class KaynScanInterceptor extends PaperbackInterceptor {
       (response.status === 403 &&
         /just a moment|challenge-platform|cf-chl/i.test(Application.arrayBufferToUTF8String(data)));
 
-    // One challenge, raised against the site itself rather than whichever
-    // request happened to meet it - asking per request stacks several at once.
     if (challenged) {
+      // Every challenge is resolved against the site root rather than the URL
+      // that happened to fail, so concurrent failures collapse into one prompt.
       throw new CloudflareError(
         {
           url: DOMAIN,
