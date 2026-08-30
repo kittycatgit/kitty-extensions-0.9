@@ -48,6 +48,45 @@ const lockedChapters = new Set<string>();
 
 const lockKey = (slug: string, number: string): string => `${slug}#${number}`;
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * The day a paid chapter stops being paid, as the reader's own clock sees it.
+ *
+ * The site states this as an instant in UTC and shows it in local time, so a
+ * chapter that frees just after midnight reads as the next day - which is what
+ * the site itself displays, and what a reader waiting for it expects.
+ */
+function freeOn(iso: string | null | undefined): string {
+  const when = new Date(iso ?? "");
+
+  if (!iso || Number.isNaN(when.getTime())) {
+    return "";
+  }
+
+  return `${when.getDate()} ${MONTHS[when.getMonth()] ?? ""}`;
+}
+
+/** How a paid chapter is described: what it costs, and when it stops costing. */
+function lockedTitle(
+  number: string,
+  row: { coinPrice?: number; becomesFreeAt?: string | null },
+): string {
+  const parts = ["locked"];
+
+  if (row.coinPrice) {
+    parts.push(`${row.coinPrice} coins`);
+  }
+
+  const free = freeOn(row.becomesFreeAt);
+
+  if (free) {
+    parts.push(`unlocks ${free}`);
+  }
+
+  return `Chapter ${number} (${parts.join(" · ")})`;
+}
+
 class KaynScanExtension implements ExtensionImpl<typeof pbconfig> {
   private readonly interceptor = new KaynInterceptor("main");
 
@@ -242,8 +281,11 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfig> {
         langCode: "en",
         chapNum: Number(number),
         // A paid chapter is listed rather than hidden, so a reader can see that
-        // it exists, and says so plainly rather than opening to nothing.
-        ...(row.isLocked ? { title: `Chapter ${number} (locked)` } : {}),
+        // it exists, and says what it costs rather than opening to nothing. The
+        // site also shows a date these unlock on; that is worked out in its own
+        // page script and appears nowhere in the data this can read, so it is
+        // not invented here.
+        ...(row.isLocked ? { title: lockedTitle(number, row) } : {}),
       });
     }
 

@@ -161,4 +161,6 @@ export interface KaynChapter {
   isLocked?: boolean;
   coinPrice?: number;
   publishedAt?: string | null;
+  /** When a paid chapter stops being paid. Absent on ones with no date set. */
+  becomesFreeAt?: string | null;
 }

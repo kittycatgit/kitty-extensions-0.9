@@ -17,23 +17,27 @@ export function parseChapters(html: string): KaynChapter[] {
   const rows: KaynChapter[] = [];
   const seen = new Set<string>();
 
-  // Each chapter arrives as an object carrying at least a number and whether it
-  // has to be paid for.
-  const pattern =
-    /\\"number\\":(-?[\d.]+)[^{}]*?\\"isLocked\\":(true|false)[^{}]*?\\"coinPrice\\":(-?\d+)/g;
-
-  for (const match of html.matchAll(pattern)) {
+  // Each chapter is one object; its fields are read from the object rather than
+  // in a fixed order, so a field moving or a new one appearing changes nothing.
+  for (const match of html.matchAll(/\\"number\\":(-?[\d.]+)([^{}]{0,600})/g)) {
     const number = match[1] ?? "";
+    const body = match[2] ?? "";
+    const locked = /\\"isLocked\\":true/.test(body);
 
-    if (!number || seen.has(number)) {
+    if (!number || seen.has(number) || !/\\"isLocked\\":/.test(body)) {
       continue;
     }
 
     seen.add(number);
+
+    const price = /\\"coinPrice\\":(-?\d+)/.exec(body);
+    const free = /\\"becomesFreeAt\\":\\"([^\\"]+)\\"/.exec(body);
+
     rows.push({
       number,
-      isLocked: match[2] === "true",
-      coinPrice: Number(match[3] ?? 0),
+      isLocked: locked,
+      coinPrice: Number(price?.[1] ?? 0),
+      ...(free?.[1] ? { becomesFreeAt: free[1] } : {}),
     });
   }
 
@@ -88,18 +92,33 @@ export function parseBook(html: string): {
 }
 
 /**
- * Every page image of a chapter, in order.
+ * Every page image of a chapter, in the order the site numbers them.
  *
- * The reader lazy-loads them, so the browser only ever holds a handful - but
- * the server sends all of them in the HTML, addressed by a zero-padded page
- * number that sorts correctly as text.
+ * Two different naming schemes are in use: older chapters are `p0001.webp`,
+ * which happens to sort correctly, while revised ones are `p-<uuid>.webp`,
+ * which carries no order at all. Neither the filename nor the order the images
+ * appear in the markup can be trusted, so the number the site states for each
+ * page is used - it is present for both schemes and is what the site itself
+ * reads.
  */
 export function parsePages(html: string): string[] {
-  const found = new Set<string>();
+  const pages: { number: number; url: string }[] = [];
+  const seen = new Set<number>();
 
-  for (const match of html.matchAll(/\/uploads\/series\/[^"'\\\s)]+?\/p\d+\.[a-z]{3,4}/gi)) {
-    found.add(match[0]);
+  // The page objects carry the number first and the address a little after it.
+  const pattern = /\\"pageNumber\\":(\d+)[^{}]{0,200}?\\"imageUrl\\":\\"([^\\"]+)\\"/g;
+
+  for (const match of html.matchAll(pattern)) {
+    const number = Number(match[1]);
+    const url = (match[2] ?? "").trim();
+
+    if (!url || !Number.isFinite(number) || seen.has(number)) {
+      continue;
+    }
+
+    seen.add(number);
+    pages.push({ number, url });
   }
 
-  return [...found].sort((left, right) => left.localeCompare(right));
+  return pages.sort((left, right) => left.number - right.number).map((page) => page.url);
 }
