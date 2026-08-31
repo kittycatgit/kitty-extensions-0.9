@@ -7,18 +7,11 @@ import type { Element } from "domhandler";
 
 import { DOMAIN, seriesUrl } from "./models";
 
-/**
- * A cover the app can always convert.
- *
- * An empty URL is rejected outright, and because a row's items are converted as
- * one array a single title without artwork empties the row it appears in. A
- * title the site has no cover for therefore points at a path the cover host
- * does not serve: the URL converts, nothing decodes, and the app draws its own
- * placeholder rather than the row disappearing.
- */
+// An empty imageUrl empties the entire row it appears in, so point coverless
+// titles at a path the host won't serve and let the app draw its placeholder.
 const MISSING_COVER = `${DOMAIN}/image/none.webp`;
 
-/** An id the bridge will carry: a space in one fails the whole object. */
+// Ids reject spaces and most punctuation; one bad id fails the whole object.
 export function slugify(value: string): string {
   return value
     .toLowerCase()
@@ -27,18 +20,12 @@ export function slugify(value: string): string {
     .replace(/^-|-$/g, "");
 }
 
-/** The slug at the end of a series link, however the link was written. */
 export function slugOf(href: string): string {
   return (href ?? "").split("?")[0]!.replace(/\/$/, "").split("/").pop()!.trim();
 }
 
-/**
- * The real address of an image.
- *
- * The theme loads its artwork lazily, so the `src` attribute is often a
- * placeholder and the address that matters is on one of several other
- * attributes, differing by which plugin wrote the page.
- */
+// Artwork loads lazily, so `src` is usually a placeholder and the real address
+// sits on one of the data attributes, varying by which plugin wrote the page.
 export function imageFrom($: CheerioAPI, node: Cheerio<Element>): string {
   for (const attribute of ["data-src", "data-lazy-src", "srcset", "src", "data-cfsrc"]) {
     const value = (node.first().attr(attribute) ?? "").trim();
@@ -60,29 +47,20 @@ export function imageFrom($: CheerioAPI, node: Cheerio<Element>): string {
   return MISSING_COVER;
 }
 
-/**
- * A row's title, read from the heading rather than the link's `title`.
- *
- * Cloudflare's Rocket Loader rewrites the inline handler beside that attribute
- * and leaves it unquoted - `title=Read Some Title Manga Online="if (!window..."`
- * - and a parser stops at the first space of an unquoted value, so every result
- * comes back titled "Read". The heading carries the same title as text, which
- * Rocket Loader does not touch.
- */
+// Rocket Loader leaves the link's `title` attribute unquoted, so a parser stops
+// at its first space and every result comes back titled "Read". Use the heading.
 function titleIn($: CheerioAPI, row: Element): string {
   const heading = $("div.post-title a", row).first().text().trim();
 
   return Application.decodeHTMLEntities(heading);
 }
 
-/** The newest chapter a listing row mentions, as a line under the title. */
 function subtitleIn($: CheerioAPI, row: Element): string {
   const chapter = $("div.chapter-item a, span.chapter a", row).first().text().trim();
 
   return chapter ? Application.decodeHTMLEntities(chapter) : "";
 }
 
-/** One row of a listing or a page of search results. */
 function rowToResult($: CheerioAPI, row: Element): SearchResultItem | undefined {
   const href = $("a", row).first().attr("href") ?? "";
   const mangaId = slugOf(href);
@@ -102,13 +80,8 @@ function rowToResult($: CheerioAPI, row: Element): SearchResultItem | undefined 
   };
 }
 
-/**
- * Search results and directory listings, which are laid out differently.
- *
- * The search route wraps each result in `div.c-tabs-item__content`; the
- * directory route uses `div.page-item-detail` and carries neither class of the
- * other. Both are looked for so one reader serves both pages.
- */
+// Search rows use c-tabs-item__content, directory rows use page-item-detail,
+// and neither page carries the other's class.
 export function parseResults($: CheerioAPI): SearchResultItem[] {
   const results: SearchResultItem[] = [];
   const seen = new Set<string>();
@@ -125,7 +98,6 @@ export function parseResults($: CheerioAPI): SearchResultItem[] {
   return results;
 }
 
-/** The labelled rows the series page lists its details in. */
 function detailRows($: CheerioAPI): Map<string, string> {
   const rows = new Map<string, string>();
 
@@ -141,7 +113,6 @@ function detailRows($: CheerioAPI): Map<string, string> {
   return rows;
 }
 
-/** A series as the app shows it. */
 export function parseSeries($: CheerioAPI, mangaId: string) {
   const rows = detailRows($);
 
@@ -177,7 +148,7 @@ export function parseSeries($: CheerioAPI, mangaId: string) {
     .map((value) => Application.decodeHTMLEntities(value.trim()))
     .filter((value) => value.length > 0 && value !== title);
 
-  // The site marks a title adult with a badge rather than a field.
+  // Adult titles are marked with a badge, not a field in the detail rows.
   const adult = $("span.manga-title-badges.adult").length > 0;
 
   return {
@@ -196,12 +167,6 @@ export function parseSeries($: CheerioAPI, mangaId: string) {
   };
 }
 
-/**
- * A chapter's pages.
- *
- * The reader writes each page as an image inside its own break, and the address
- * is on `data-src` as often as on `src`.
- */
 export function parsePages($: CheerioAPI): string[] {
   const pages: string[] = [];
 
@@ -216,14 +181,8 @@ export function parsePages($: CheerioAPI): string[] {
   return pages;
 }
 
-/**
- * The genres the search actually filters by.
- *
- * Each genre is a checkbox carrying its slug in the input's value and its name
- * in the label beside it. The slug is what the filter matches: asking this site
- * for the label's `for` - which is only the checkbox's own id - returns nothing
- * at all, while the value returns the titles.
- */
+// The filter matches the input's value. The label's `for` is only the
+// checkbox's own id and searching by it returns nothing.
 export function parseGenres($: CheerioAPI): Tag[] {
   const genres: Tag[] = [];
 

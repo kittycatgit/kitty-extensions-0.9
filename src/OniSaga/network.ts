@@ -10,13 +10,8 @@ import {
 
 import { DOMAIN, HTML_GAP_MS, READER_TOKEN_HEADER, USER_AGENT, pagesInfoUrl } from "./models";
 
-/**
- * A cross-request lock, module-level so it is shared by every request.
- *
- * This is the one primitive proven to serialise on Paperback's native bridge:
- * the shipped BasicRateLimiter uses exactly this (an identical lock lives in
- * `@paperback/types` but is not re-exported, so it is reproduced here).
- */
+// Copied from BasicRateLimiter: the same lock exists in @paperback/types but is
+// not exported, and it is the only primitive that serialises on the native bridge.
 const lockPromises: Record<string, Promise<void> | undefined> = {};
 const lockResolvers: Record<string, (() => void) | undefined> = {};
 
@@ -46,23 +41,9 @@ function unlock(uid: string): void {
 const HTML_LOCK = "onisaga.htmlFetch";
 const LAST_AT_KEY = "onisaga.lastAt";
 
-/**
- * Headers, Cloudflare, and a light hand on browsing - nothing else.
- *
- * Chapter pages are minted in one place, when the chapter opens, inside a
- * WebView. There is deliberately no second way to resolve a page here: a
- * fallback path that quietly takes over is how a chapter ends up loading a page
- * every six seconds with nothing in the log to say why. If minting fails the
- * chapter says so and is opened again, rather than limping along on a slower
- * road nobody chose.
- */
+// Page URLs are minted only in the WebView when the chapter opens. Do not add a
+// fallback resolver here - it takes over silently and refetches every few seconds.
 export class OniSagaInterceptor extends PaperbackInterceptor {
-  /**
-   * Asks the site how long a chapter is and whether it is ready.
-   *
-   * Used only when the chapter's own page does not say, so an ordinary chapter
-   * costs nothing extra and an awkward one still opens.
-   */
   async chapterInfo(
     chapterId: string,
     token: string,
@@ -107,11 +88,8 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     return request;
   }
 
-  /**
-   * Spaces ordinary page fetches so a screenful of rails is not asked for all
-   * at once. Images are left alone: they are not metered, and their addresses
-   * were signed when the chapter opened.
-   */
+  // Images are skipped: they are not metered and their URLs were already signed
+  // when the chapter opened.
   private async paceBrowsing(url: string): Promise<void> {
     if (!url.startsWith(DOMAIN) || /\/_img\//.test(url)) {
       return;

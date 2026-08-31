@@ -58,104 +58,48 @@ type Metadata = {
 };
 
 export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig> {
-  /**
-   * The Madara URL of the website. Eg. https://webtoon.xyz
-   */
   readonly domain: string;
 
-  /**
-   * The readable name of the website. Eg. Toonily
-   */
   readonly name: string;
 
-  /**
-   * The default content rating. Eg. Hiperdex = Adult
-   */
   readonly defaultContentRating: ContentRating;
 
-  /**
-   * The language code the source's content is served in in string form.
-   */
   readonly language: string;
 
-  /**
-   * If it's not possible to use postIds for certain reasons, you can disable this here.
-   */
   readonly usePostIds: boolean;
 
-  /**
-   * The path used for search pagination. Used in search function.
-   * Eg. for https://mangabob.com/page/2/?s&post_type=wp-manga it would be 'page'
-   */
+  // The path segment before the page number: /page/2/?s&post_type=wp-manga -> "page".
   readonly searchPagePathName: string;
 
-  /**
-   * Different Madara sources might have a slightly different selector which is required to parse out
-   * each manga object while on a search result page. This is the selector
-   * which is looped over. This may be overridden if required.
-   */
   readonly searchMangaSelector: string;
 
-  /**
-   * The selector used for the average rating.
-   */
   readonly searchRatingSelector: string;
 
-  /**
-   * Set to true if the source makes use of the manga chapter protector plugin.
-   * (https://mangabooth.com/product/wp-manga-chapter-protector/)
-   */
+  // True when the site runs the wp-manga-chapter-protector plugin.
   readonly hasProtectedChapters: boolean;
 
-  /**
-   * Some sources may in the future change how to get the chapter protector data,
-   * making it configurable, will make it way more flexible and open to customized installations of the protector plugin.
-   */
   readonly protectedChapterDataSelector: string;
 
-  /**
-   * Some sites use the alternate URL for getting chapters through ajax
-   * 0: (POST) Form data https://domain.com/wp-admin/admin-ajax.php
-   * 1: (POST) Alternative Ajax page (https://domain.com/manga/manga-slug/ajax/chapters)
-   * 2: (POST) Manga page (https://domain.com/manga/manga-slug)
-   * 3: (GET) (DEFAULT) Manga page (https://domain.com/manga/manga-slug)
-   */
+  // Picks one of the four request shapes in getChapters().
   readonly chapterEndpoint: number;
 
-  /**
-   * Different Madara sources might have a slightly different selector which is required to parse out
-   * each page while on a chapter page. This is the selector
-   * which is looped over. This may be overridden if required.
-   */
   readonly chapterDetailsSelector: string;
 
-  /**
-   * Some websites have the Cloudflare defense check enabled on specific parts of the website, these need to be loaded when using the Cloudflare bypass within the app
-   */
+  // Page the app must load to solve Cloudflare when only part of the site is challenged.
   readonly bypassPage: string;
 
-  /**
-   * The directory path is need to fetch Discovery Sections, however it mostly done automatically, set this when the parser fails!
-   */
+  // Set this when the directory path parser gets it wrong.
   readonly directoryPath: string;
 
-  /**
-   * Some sources may redirect to the manga page instead of the chapter page if adding the parameter '?style=list'
-   */
+  // Some sources redirect to the manga page when ?style=list is added.
   readonly useListParameter: boolean;
 
-  /**
-   * Allows providing a custom user agent without replacing the whole interceptor.
-   */
   readonly userAgent?: string;
 
   parser: MadaraParser;
 
   requestManager: PaperbackInterceptor;
 
-  /**
-   *
-   */
   constructor(params: GenericParams) {
     this.name = params.name;
     this.domain = params.domain;
@@ -351,7 +295,7 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
 
     const items = await this.parser.parseDiscoverSections($, section, this);
 
-    metadata = { page: page + 1 }; // Madara doesn't support last page checking, will return 404 on website!
+    metadata = { page: page + 1 }; // Madara has no last-page marker; it just 404s past the end.
 
     return {
       items: items,
@@ -391,7 +335,7 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
     const [_response, buffer] = await this.constructSearchRequest(page, query, sortingOption);
 
     if (_response.status === 404) {
-      return { items: [], metadata: undefined }; // Madara doesn't support last page checking, will return 404 on website!
+      return { items: [], metadata: undefined }; // Past the last page Madara answers 404.
     }
 
     const $ = cheerio.load(Application.arrayBufferToUTF8String(buffer));
@@ -414,11 +358,7 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
     };
   }
 
-  /**
-   * Called by the app once the user has completed the in-app Cloudflare
-   * challenge. This is the current callback; `saveCloudflareBypassCookies`
-   * below is the deprecated form, kept so older app builds still work.
-   */
+  // Called by the app once the user has cleared the in-app Cloudflare challenge.
   async cloudflareBypassCompleted(
     _request: Request,
     cookies: Cookie[],
@@ -434,15 +374,14 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
 
   private storeBypassCookies(cookies: Cookie[]): void {
     for (const cookie of cookies) {
-      // `cf_clearance` is what actually carries the bypass, but the site's own
-      // session cookie is usually issued alongside it and is needed too.
+      // cf_clearance carries the bypass, but the site's own session cookie is
+      // issued alongside it and is needed too.
       if (/^(?:__)?_?cf/i.test(cookie.name) || /session|phpsessid/i.test(cookie.name)) {
         this.cookieStorageInterceptor.setCookie(cookie);
       }
     }
   }
 
-  // Utility
   constructSearchRequest(
     page: number,
     query: SearchQuery<MadaraSearchMetadata>,
@@ -471,7 +410,7 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
     });
   }
 
-  // convert smart quotes (iOS uses them by default)
+  // Convert smart quotes; iOS types them by default and the search rejects them.
   sanitizeQuery(query: string): string {
     return query.replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
   }
@@ -482,10 +421,8 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
     let slug: string = "";
 
     if (!isPostId) {
-      // mangaId is already the slug
       slug = mangaId.toString();
 
-      // Only resolve the postId when this source actually uses post IDs
       if (getUsePostIds(this.usePostIds)) {
         postId = Application.getState(slug) as number;
         if (!postId) {
@@ -493,13 +430,10 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
         }
       }
     } else {
-      // If mangaId IS a postId
       const postIdInput = Number(mangaId);
 
-      // Fetch slug for postId
       slug = Application.getState(postIdInput.toString()) as string;
 
-      // If unable to fetch slug, turn postId into slug
       if (!slug) {
         slug = (await this.convertPostIdToSlug(postIdInput)).slug;
       }
@@ -507,7 +441,6 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
       postId = postIdInput;
     }
 
-    // We only need to store these if we actually care about them
     if (getUsePostIds(this.usePostIds)) {
       Application.setState(postId.toString(), slug);
       Application.setState(slug, postId.toString());
@@ -528,10 +461,8 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
     const $ = cheerio.load(Application.arrayBufferToUTF8String(buffer));
 
     let parseURL: string;
-    // Step 1: Try to get slug from og-url
     parseURL = $('meta[property="og:url"]').attr("content") ?? "";
 
-    // Step 2: Try to get slug from canonical
     if (!parseURL.includes(this.domain)) {
       parseURL = $('link[rel="canonical"]').attr("href") ?? "";
     }
@@ -553,7 +484,7 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
   }
 
   async convertSlugToPostId(slug: string): Promise<number> {
-    // Credit to the MadaraDex team :-D
+    // The Link header on a HEAD response carries ?p=<postId>. Credit to the MadaraDex team.
     const [headResponse] = await Application.scheduleRequest({
       url: `${this.domain}/temp_dirpath/${slug}`,
       method: "HEAD",
@@ -565,7 +496,6 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
       return postIdMatch;
     }
 
-    // Move on to the alternative method of parsing
     const [, buffer] = await Application.scheduleRequest({
       url: `${this.domain}/temp_dirpath/${slug}`,
       method: "GET",
@@ -573,7 +503,6 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
 
     const $ = cheerio.load(Application.arrayBufferToUTF8String(buffer));
 
-    // Step 1: Try to get postId from shortlink
     const postId_1 = $('link[rel="shortlink"]')?.attr("href")?.split("/?p=")[1];
     if (postId_1) {
       const postId = Number(postId_1);
@@ -582,7 +511,6 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
       }
     }
 
-    // Step 2: If no number has been found, try to parse from data-post
     const postId_2 = $("a.wp-manga-action-button")?.attr("data-post");
     if (postId_2) {
       const postId = Number(postId_2);
@@ -591,7 +519,6 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
       }
     }
 
-    // Step 3: If no number has been found, try to parse from manga script
     const page = $.root().html();
     const match = page?.match(/manga_id["']?\s*:\s*["']?(\d+)/);
     if (match?.[1]) {
@@ -605,13 +532,11 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
   }
 
   async getDirectoryPath(): Promise<string> {
-    // Always use the override if set
     if (this.directoryPath) {
       return this.directoryPath;
     }
 
     const getPath = Application.getState(`dirpath_${this.domain}`) as string;
-    // Return stored path
     if (getPath) {
       return getPath;
     }
@@ -623,9 +548,8 @@ export abstract class MadaraGeneric implements ExtensionImpl<typeof basePbConfig
 
     const $ = cheerio.load(Application.arrayBufferToUTF8String(buffer));
 
-    const path = this.parser.parseDirectoryPath($, this); // Returns "manga" (default) if unable to parse
+    const path = this.parser.parseDirectoryPath($, this); // Falls back to "manga".
 
-    // Store parsed path else store the default (manga)
     Application.setState(path, `dirpath_${this.domain}`);
     return path;
   }

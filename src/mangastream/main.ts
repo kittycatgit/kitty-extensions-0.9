@@ -123,12 +123,8 @@ export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbC
     this.interceptor.registerInterceptor();
   }
 
-  /**
-   * The four dropdowns the theme puts above its listing, read off the page.
-   *
-   * They change only when the site adds a genre, so they are kept between
-   * openings rather than fetched every time the filter sheet appears.
-   */
+  // Scraped off the listing page and cached - they only change when the site
+  // adds a genre.
   async searchTags(): Promise<TagSection[]> {
     let tags: TagSection[] = Application.getState("tags") as TagSection[];
     if (tags) {
@@ -155,8 +151,7 @@ export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbC
     metadata: MangaStreamSearchMetadata | undefined,
   ): Promise<PagedResults<SearchResultItem>> {
     const page: number = metadata?.page ?? 1;
-    // The filters are chosen once and then carried from page to page, so a
-    // second page of a filtered listing is still that listing.
+    // Filters are chosen once and then carried along in the paging metadata.
     const filters: MangaStreamFilters = { ...query?.metadata, ...metadata };
 
     let urlBuilder: URL = new URL(this.domain)
@@ -169,9 +164,8 @@ export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbC
         encodeURIComponent(query?.title.replace(/[’–][a-z]*/g, "") ?? ""),
       );
     } else {
-      // The theme's own form posts its genres as repeated `genre[]` items and
-      // the rest as single values; sending them any other way answers with a
-      // server error rather than a listing.
+      // Genres go as repeated `genre[]` items and the rest as single values;
+      // anything else answers with a server error instead of a listing.
       const genres = (filters.genres ?? []).map(valueOf).filter((genre) => genre.length > 0);
 
       if (genres.length) {
@@ -234,14 +228,12 @@ export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbC
       method: "GET",
     };
 
-    // const response = await this.requestManager.schedule(request, 1)
     const [_response, buffer] = await Application.scheduleRequest(request);
     const $ = cheerio.load(Application.arrayBufferToUTF8String(buffer));
 
     return this.parser.parseChapterList($, sourceManga, this);
   }
   async getChapterDetails(chap: Chapter): Promise<ChapterDetails> {
-    // Request the manga page
     const request = {
       url: getUsePostIds()
         ? `${this.domain}/?p=${chap.sourceManga.mangaId}/`
@@ -264,12 +256,10 @@ export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbC
       throw new Error(`Unable to fetch a chapter for chapter number: ${chap.chapterId}`);
     }
 
-    // Fetch the ID (URL) of the chapter
     const id = $("a", chapter).attr("href") ?? "";
     if (!id) {
       throw new Error(`Unable to fetch id for chapter with chapter id: ${chap.chapterId}`);
     }
-    // Request the chapter page
     const _request: Request = {
       url: id,
       method: "GET",
@@ -370,10 +360,8 @@ export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbC
     const $ = cheerio.load(Application.arrayBufferToUTF8String(buffer));
 
     let parseSlug: string;
-    // Step 1: Try to get slug from og-url
     parseSlug = String($('meta[property="og:url"]').attr("content"));
 
-    // Step 2: Try to get slug from canonical
     if (!parseSlug.includes(this.domain)) {
       parseSlug = String($('link[rel="canonical"]').attr("href"));
     }
@@ -422,15 +410,12 @@ export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbC
     const [_, buffer] = await Application.scheduleRequest(request);
     const $ = cheerio.load(Application.arrayBufferToUTF8String(buffer));
 
-    // Step 1: Try to get postId from shortlink
     let postIdNum = Number($('link[rel="shortlink"]')?.attr("href")?.split("/?p=")[1]);
 
-    // Step 2: If no number has been found, try to parse from data-id
     if (isNaN(postIdNum)) {
       postIdNum = Number($("div.bookmark").attr("data-id"));
     }
 
-    // Step 3: If no number has been found, try to parse from manga script
     if (isNaN(postIdNum)) {
       const page = $.root().html();
       const match = page?.match(/postID.*\D(\d+)/);

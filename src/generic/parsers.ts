@@ -13,7 +13,7 @@ import {
   type TagSection,
 } from "@paperback/types";
 import type { Cheerio, CheerioAPI } from "cheerio";
-import { Element } from "domhandler"; // Import Element from domhandler
+import { Element } from "domhandler";
 
 import { getUseHQThumbnails, getUsePostIds } from "./forms";
 import { MadaraGeneric } from "./main";
@@ -80,7 +80,6 @@ export class MadaraParser {
 
     let contentRating = source.defaultContentRating;
 
-    // Firstly check if the 18+ badge is present on the item
     const adultBadge = $("span.manga-title-badges.custom.adult");
     if (adultBadge.length) {
       contentRating = ContentRating.ADULT;
@@ -93,7 +92,6 @@ export class MadaraParser {
 
       if (!title || !id) continue;
 
-      // If item contains NSFW, set item to adult
       if (["adult", "mature"].includes(title.toLowerCase())) {
         contentRating = ContentRating.ADULT;
       }
@@ -125,7 +123,6 @@ export class MadaraParser {
     const nodeArray = $("li.wp-manga-chapter  ").toArray();
     let nodesProcessed = 0;
 
-    // For each available chapter..
     for (const obj of nodeArray) {
       const sortingIndex = nodeArray.length - nodesProcessed++;
       const id = this.idCleaner($("a", obj).first().attr("href") ?? "");
@@ -139,7 +136,6 @@ export class MadaraParser {
           ? chapNumRegex[1].replace(/[-_]/gm, ".")
           : (chapNumRegex?.[2] ?? "0");
 
-      // make sure the chapter number is a number and not NaN
       chapNum = parseFloat(chapNum) ?? 0;
 
       let mangaTime: Date;
@@ -148,14 +144,12 @@ export class MadaraParser {
         obj,
       ).attr("title");
       if (typeof timeSelector !== "undefined") {
-        // Firstly check if there is a NEW tag, if so parse the time from this
+        // A NEW tag puts the real date in the anchor's title attribute.
         mangaTime = this.parseDate(timeSelector ?? "");
       } else {
-        // Else get the date from the info box
         mangaTime = this.parseDate($("span.chapter-release-date > i", obj).text().trim());
       }
 
-      // Check if the date is a valid date, else return the current date
       if (!mangaTime.getTime()) mangaTime = new Date();
 
       if (!id || typeof id === "undefined" || id === "#") {
@@ -347,7 +341,6 @@ export class MadaraParser {
   }
 
   parseDirectoryPath($: CheerioAPI, source: MadaraGeneric): string {
-    // Parse path from first search result
     const searchResult = $(source.searchMangaSelector).first();
     const searchResultPath: string =
       ($("a", searchResult).attr("href") ?? "").replace(/\/$/, "").split("/").slice(-2).shift() ??
@@ -356,7 +349,6 @@ export class MadaraParser {
       return searchResultPath;
     }
 
-    // Fallback: Parse path from meta property
     const url = $('meta[property="og:url"]').attr("content") ?? "";
     const fullPath = url.replace(source.domain, "");
     const pathSegment = (fullPath.split("/")[1] ?? "").trim();
@@ -367,7 +359,6 @@ export class MadaraParser {
     return "manga";
   }
 
-  // Utils
   async getImageSrc(
     imageObj: Cheerio<Element> | undefined,
     source: MadaraGeneric,
@@ -403,10 +394,11 @@ export class MadaraParser {
 
     image = image?.trim().replace(/(\s{2,})/gi, "");
 
-    image = image?.replace(/http:\/\/\//g, "http://"); // only changes urls with http protocol
+    // Some sites emit a triple slash after the scheme; collapse it, and serve
+    // everything over https.
+    image = image?.replace(/http:\/\/\//g, "http://");
     image = image?.replace(/http:\/\//g, "https://");
-    // Malforumed url fix (Turns https:///example.com into https://example.com (or the http:// equivalent))
-    image = image?.replace(/https:\/\/\//g, "https://"); // only changes urls with https protocol
+    image = image?.replace(/https:\/\/\//g, "https://");
 
     return decodeURI(Application.decodeHTMLEntities(image ?? ""));
   }

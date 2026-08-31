@@ -51,7 +51,6 @@ import {
 } from "./parsers";
 import type pbconfigType from "./pbconfig";
 
-/** Fields shared by every listing query. */
 const LIST_FIELDS =
   "id,rank,title,slug,status,image,latestChapter,genres,author,isSafe,isLicensed,updatedDate";
 
@@ -108,13 +107,6 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
     return { id: chapter.chapterId, mangaId, pages };
   }
 
-  /**
-   * The catalogue's genre list, fetched once a day and cached.
-   *
-   * The API publishes its genres, so they are read from there rather than
-   * frozen into the build; the bundled list is only a fallback for when that
-   * request fails, so the filter is never left empty.
-   */
   private async genreTags(): Promise<Tag[]> {
     const cached = Application.getState(GENRE_STATE_KEY) as
       | { at?: number; genres?: Tag[] }
@@ -142,7 +134,7 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
         return genres;
       }
     } catch {
-      /* fall back to the bundled list below */
+      /* fall back to the bundled list */
     }
 
     return cached?.genres && cached.genres.length > 0 ? cached.genres : GENRES;
@@ -159,7 +151,6 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
     );
   }
 
-  /** Builds the arguments shared by every `search` call. */
   private searchArgs(
     title: string,
     sort: string,
@@ -167,8 +158,8 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
     offset: number,
     limit: number,
   ): string {
-    // A genre argument is a comma-joined list of slugs, or "all" for no filter.
-    // An unknown slug makes the resolver throw, so only offered slugs are sent.
+    // A comma-joined list of slugs, or "all" for no filter. An unknown slug
+    // makes the resolver throw, so only slugs we offered are sent.
     const genre = filters.genres && filters.genres.length > 0 ? filters.genres.join(",") : "all";
 
     return [
@@ -246,7 +237,6 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
         type: DiscoverSectionType.featured,
       },
       { id: LATEST_SECTION_ID, title: "Latest Updates", type: DiscoverSectionType.chapterUpdates },
-      // Every sorted rail shares one carousel so they read as a set.
       ...SORTED_SECTIONS.map((section) => ({
         id: section.id,
         title: section.title,
@@ -280,7 +270,7 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
     }
 
     if (section.id === POPULAR_UPDATES_SECTION_ID) {
-      // This query takes no paging arguments and answers with a fixed set.
+      // latestPopular takes no paging arguments; it answers with a fixed set.
       const data = await this.api.query<{ latestPopular?: ApiManga[] }>(
         `{latestPopular(x:${SOURCE}){id,title,slug,image,latestChapter,isSafe,isLicensed}}`,
       );
@@ -306,8 +296,6 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
       return await this.latestUpdates(offset);
     }
 
-    // Resolve the rail by its own id: falling through to a default would show
-    // the same titles under several different headings.
     const sorted = SORTED_SECTIONS.find((entry) => entry.id === section.id);
 
     if (!sorted) {
@@ -347,8 +335,6 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
     const items: DiscoverSectionItem[] = [];
 
     for (const row of rows) {
-      // The feed carries the chapters released for each title; the newest of
-      // them is what the rail links to.
       const newest = [...(row.chapters ?? [])].sort((a, b) => b.number - a.number)[0];
       const number = newest?.number ?? row.latestChapter;
 
@@ -383,8 +369,8 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
       }
 
       this.cookieStorage.setCookie(cookie);
-      // Kept alongside the store so clearance survives however its lifetime
-      // happens to parse.
+      // Also held on the interceptor, so clearance survives however the store
+      // parses its lifetime.
       this.interceptor.setCookie(cookie.name, cookie.value);
     }
   }

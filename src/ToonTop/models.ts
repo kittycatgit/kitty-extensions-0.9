@@ -3,20 +3,17 @@
 
 import type { SortingOption } from "@paperback/types";
 
-/** Alternate titles arrive as objects, not plain strings. */
 export type ToonTopAltName = {
   name?: string;
   language?: string;
 };
 
-/** A named reference as the site returns them (genres, tags, authors). */
 export type ToonTopRef = {
   id: string;
   name: string;
   slug: string;
 };
 
-/** A row in any listing, and the detail payload, share one shape. */
 export type ToonTopStats = {
   views?: number;
   dayViews?: number;
@@ -74,7 +71,7 @@ export type ToonTopSearchMetadata = {
   completed?: boolean;
 };
 
-/** `sort` accepted by the genre listings. */
+// Only the genre listings honour these; latest and popular ignore sort.
 export const SORTING_OPTIONS: SortingOption[] = [
   { id: "latest", label: "Latest" },
   { id: "popular", label: "Popular" },
@@ -84,11 +81,8 @@ export const SORTING_OPTIONS: SortingOption[] = [
 
 export const DEFAULT_SORT = "latest";
 
-/**
- * Rankings computed locally. The site ships per-title day/week/month view
- * counts on every listing row, but neither `latest` nor `popular` honours a
- * sort parameter, so these are ordered client side over a pooled sample.
- */
+// Ranked here, not by the site: listing rows carry day/week/month view counts,
+// but no listing endpoint will sort by them.
 export const RANKED_SECTIONS: {
   id: string;
   title: string;
@@ -101,7 +95,7 @@ export const RANKED_SECTIONS: {
   { id: "mostBookmarked", title: "Most Bookmarked", by: "bookmarksCount" },
 ];
 
-/** Discover rails, matching the sections the site's own home page shows. */
+// `prop` is the key each section sits under in the home page's embedded props.
 export const HOME_SECTIONS: { id: string; title: string; prop: string }[] = [
   { id: "hero", title: "Featured", prop: "heroItems" },
   { id: "trending", title: "Trending", prop: "trendingItems" },

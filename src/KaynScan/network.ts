@@ -10,13 +10,8 @@ import {
 
 import { DOMAIN, USER_AGENT } from "./models";
 
-/**
- * Sets the headers the site expects, and nothing else.
- *
- * Requests are not paced, retried or held here. The app owns its own queue and
- * honours a 429 itself; a limiter on top of it only fights the scheduler that
- * owns the requests.
- */
+// Headers only. Do not pace, retry or queue here - the app owns the request
+// queue and handles 429 itself; a limiter on top of it fights the scheduler.
 export class KaynInterceptor extends PaperbackInterceptor {
   override async interceptRequest(request: Request): Promise<Request> {
     request.headers = {
@@ -41,8 +36,8 @@ export class KaynInterceptor extends PaperbackInterceptor {
         /just a moment|challenge-platform|cf-chl/i.test(Application.arrayBufferToUTF8String(data)));
 
     if (challenged) {
-      // Every challenge is resolved against the site root rather than the URL
-      // that happened to fail, so concurrent failures collapse into one prompt.
+      // Point every challenge at the site root, never the URL that failed:
+      // one shared URL collapses concurrent failures into a single prompt.
       throw new CloudflareError(
         {
           url: DOMAIN,

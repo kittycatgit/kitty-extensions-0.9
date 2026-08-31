@@ -3,7 +3,6 @@
 
 import type { SortingOption, Tag } from "@paperback/types";
 
-/** Paging and filter state carried between pages of results. */
 export type MangaHubSearchMetadata = {
   offset?: number;
   page?: number;
@@ -15,12 +14,8 @@ export type MangaHubSearchMetadata = {
   completed?: boolean;
 };
 
-/**
- * Records as the GraphQL schema declares them.
- *
- * Two fields are delimited strings rather than lists: `genres` is comma
- * separated and `alternativeTitle` is semicolon separated.
- */
+// `genres` and `alternativeTitle` are delimited strings, not lists: comma and
+// semicolon respectively.
 export type ApiManga = {
   id: number;
   title: string;
@@ -54,7 +49,7 @@ export type ApiChapter = {
   date?: string | null;
 };
 
-/** The reader payload; `pages` is a JSON string, not an object. */
+// `pages` is a JSON string, not an object.
 export type ApiChapterFull = ApiChapter & {
   mangaID?: number | null;
   pages?: string | null;
@@ -71,7 +66,7 @@ export type ApiGenre = {
 
 export type ApiSearch = { rows?: ApiManga[] | null; count?: number | null };
 
-/** The source the site itself queries; the schema exposes others it does not use. */
+// The schema exposes other sources, but this is the only one the site queries.
 export const SOURCE = "m01";
 
 export const API_URL = "https://api.mghcdn.com/graphql";
@@ -79,24 +74,12 @@ export const DOMAIN = "https://mangahub.io";
 export const COVER_CDN = "https://thumb.mghcdn.com";
 export const PAGE_CDN = "https://imgx.mghcdn.com";
 
-/**
- * Stand-in cover for titles the API has no artwork for.
- *
- * The app rejects an empty string with "Invalid URL" and, because covers are
- * converted as an array, one missing cover fails the whole rail rather than a
- * single card. This is a real URL on the cover host that holds no image, so
- * the app falls through to its own placeholder rather than being handed
- * substitute artwork.
- */
+// An empty cover URL fails the whole rail, not just one card. This is a real URL
+// holding no image, so the app falls through to its own placeholder.
 export const FALLBACK_COVER = `${COVER_CDN}/no-cover.jpg`;
 
-/**
- * The schema's own `SearchMod` values, all verified to return distinct rows.
- *
- * `Status` is deliberately absent: the schema accepts it but the resolver
- * ignores it, returning the same 77,973 rows with mixed statuses whichever
- * value is passed, so offering it would be a filter that does nothing.
- */
+// `Status` is left out: the schema accepts it but the resolver ignores it and
+// returns the same rows whatever you pass.
 export const SORTING_OPTIONS: SortingOption[] = [
   { id: "POPULAR", label: "Popular" },
   { id: "LATEST", label: "Latest" },
@@ -108,19 +91,18 @@ export const SORTING_OPTIONS: SortingOption[] = [
 export const DEFAULT_SORT = "POPULAR";
 
 export const PAGE_SIZE = 30;
-/** `latestPopular` takes no paging arguments and answers with a fixed 20. */
+// `latestPopular` takes no paging arguments and answers with a fixed 20.
 export const LATEST_PAGE_SIZE = 30;
 
 export const GENRE_CACHE_TTL = 24 * 60 * 60 * 1000;
 export const GENRE_STATE_KEY = "mangahub.genres";
-/** Bumped when older builds cached a token the site never issued. */
+// Suffix bumped to drop tokens older builds cached that the site never issued.
 export const ACCESS_STATE_KEY = "mangahub.access2";
 
 export const POPULAR_UPDATES_SECTION_ID = "popular-updates";
 export const LATEST_SECTION_ID = "latest-updates";
 export const GENRES_SECTION_ID = "genres";
 
-/** Rails backed by a `search` sort, all rendered the same way. */
 export const SORTED_SECTIONS: { id: string; title: string; mod: string }[] = [
   { id: "popular", title: "Popular", mod: "POPULAR" },
   { id: "new", title: "New", mod: "NEW" },
@@ -135,13 +117,8 @@ export const STATUS_LABELS: Record<string, string> = {
   hiatus: "Hiatus",
 };
 
-/**
- * Fallback genre list, captured from the API's own `genres` query.
- *
- * The live list is fetched and cached at runtime; this is only what the filter
- * falls back to when that request fails, and the name-to-slug map the detail
- * parser uses to build valid tag ids.
- */
+// Fallback for when the live `genres` query fails, and the name-to-slug map the
+// detail parser needs to build valid tag ids.
 export const GENRES: Tag[] = [
   { id: "action", title: "Action" },
   { id: "adventure", title: "Adventure" },

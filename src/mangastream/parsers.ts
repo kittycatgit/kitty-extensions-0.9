@@ -123,7 +123,6 @@ export class MangaStreamParser {
     for (const chapter of $("li", "div#chapterlist").toArray()) {
       const title = $("span.chapternum", chapter).text().trim().replace(/\s+/g, " ");
       const date = convertDate($("span.chapterdate", chapter).text().trim(), source);
-      // Set data-num attribute as id
       const id = (chapter.attribs["data-num"] ?? "").replaceAll(" ", "-");
       const chapterNumberRegex = id.match(/(\d+\.?\d?)+/);
       let chapterNumber = 0;
@@ -143,7 +142,7 @@ export class MangaStreamParser {
       }
 
       chapters.push({
-        chapterId: id, // Store chapterNumber as id
+        chapterId: id,
         langCode: language,
         chapNum: chapterNumber,
         title,
@@ -177,7 +176,7 @@ export class MangaStreamParser {
     if (!readerScript) {
       throw new Error(
         `Failed to find page details script for manga ${chapter.sourceManga.mangaId}`,
-      ); // If null, throw error, else parse data to json.
+      );
     }
 
     const scriptMatch = readerScript.html()?.match(/ts_reader\.run\((.*?(?=\);|},))/);
@@ -198,7 +197,7 @@ export class MangaStreamParser {
     }
 
     if (!scriptStr) {
-      throw new Error(`Failed to parse script for manga ${chapter.sourceManga.mangaId}`); // If null, throw error, else parse data to json.
+      throw new Error(`Failed to parse script for manga ${chapter.sourceManga.mangaId}`);
     }
 
     if (!scriptStr.endsWith("}")) {
@@ -212,7 +211,6 @@ export class MangaStreamParser {
     }
 
     for (const index of scriptObj.sources) {
-      // Check all sources, if empty continue.
       if (index?.images.length == 0) continue;
       index.images.map((p: string) => pages.push(encodeURI(p.trim())));
     }
@@ -379,14 +377,8 @@ export class MangaStreamParser {
     };
   }
 
-  /**
-   * Whether a listing has run out of pages.
-   *
-   * A site on this theme renders either the theme's own arrow or WordPress's
-   * numbered pagination, never both, so a page is the last one only when
-   * neither offers anything to go on to. Asking about one marker alone made
-   * every first page look like the only page on a site that uses the other.
-   */
+  // A site on this theme renders either the theme's own arrow or WordPress's
+  // numbered pagination, never both, so check for the absence of both.
   isLastPage = ($: CheerioAPI): boolean => {
     return !$("a.r")[0] && !$("a.next.page-numbers")[0];
   };

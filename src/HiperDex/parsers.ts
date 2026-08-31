@@ -12,14 +12,9 @@ import {
   type ApiSeries,
 } from "./models";
 
-/**
- * Normalises the alternative-title field into plain strings.
- *
- * The detail route returns a JSON-encoded array while search hits return a real
- * array, and either can hold objects rather than strings. Anything that is not
- * a usable string is dropped: a non-string reaching `secondaryTitles` fails to
- * cross the bridge and takes the whole title with it.
- */
+// The detail route returns a JSON-encoded array while search hits return a real
+// array, and either can hold objects rather than strings. A non-string reaching
+// `secondaryTitles` fails to cross the bridge and takes the whole title with it.
 export function normaliseTitles(raw: ApiSeries["alternativeTitles"]): string[] {
   let values: unknown = raw;
 
@@ -78,17 +73,11 @@ function numberOrUndefined(value: number | null | undefined): number | undefined
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-/** The site's own slug for each genre, looked up by display name. */
 const GENRE_SLUGS = new Map(GENRES.map((genre) => [genre.title.toLowerCase(), genre.id]));
 
-/**
- * Turns a genre name into a usable tag id.
- *
- * The detail route names genres rather than slugging them, and an id may only
- * hold alphanumerics and `._-@()[]%?#+=/&:` — a name like "Age Gap" is rejected
- * outright and takes the whole title with it. The catalogue's own slug is used
- * where there is one so the id matches what the search filter expects.
- */
+// The detail route names genres rather than slugging them, and an id may only
+// hold alphanumerics and `._-@()[]%?#+=/&:` — a name like "Age Gap" is rejected
+// outright and takes the whole title with it.
 function genreId(name: string): string {
   const known = GENRE_SLUGS.get(name.toLowerCase());
 
@@ -105,7 +94,6 @@ function genreId(name: string): string {
   return slug || "unknown";
 }
 
-/** Builds the detail record, carrying across every field the API exposes. */
 export function parseMangaDetails(
   series: ApiSeries,
   domain: string,
@@ -146,7 +134,6 @@ export function parseMangaDetails(
       status: statusOf(series.status),
       ...(joinNames(series.authors) ? { author: joinNames(series.authors) } : {}),
       ...(joinNames(series.artists) ? { artist: joinNames(series.artists) } : {}),
-      // The site scores out of five; the app expects the same scale it is given.
       ...(numberOrUndefined(series.score) !== undefined ? { rating: series.score as number } : {}),
       ...(tags.length > 0 ? { tagGroups: [{ id: "genres", title: "Genres", tags }] } : {}),
       ...(Object.keys(additionalInfo).length > 0 ? { additionalInfo } : {}),
@@ -155,7 +142,6 @@ export function parseMangaDetails(
   };
 }
 
-/** Newest chapter first, which is the order the app lists them in. */
 export function parseChapters(rows: ApiChapter[], sourceManga: SourceManga): Chapter[] {
   const sorted = [...rows].sort((a, b) => b.number - a.number);
 
@@ -163,7 +149,7 @@ export function parseChapters(rows: ApiChapter[], sourceManga: SourceManga): Cha
     const published = row.createdAt ? new Date(row.createdAt) : undefined;
 
     return {
-      // The reader is addressed by chapter number, so that is the stable id.
+      // The reader is addressed by chapter number, not by a slug.
       chapterId: String(row.number),
       sourceManga,
       langCode: (row.language ?? "en").toLowerCase(),
@@ -176,7 +162,6 @@ export function parseChapters(rows: ApiChapter[], sourceManga: SourceManga): Cha
   });
 }
 
-/** Page URLs in reading order, preferring the webp the site itself serves. */
 export function parseChapterPages(pages: ApiPage[]): string[] {
   return [...pages]
     .sort((a, b) => a.pageOrder - b.pageOrder)

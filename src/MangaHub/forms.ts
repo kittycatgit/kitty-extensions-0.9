@@ -14,7 +14,6 @@ import {
 
 import type { MangaHubSearchMetadata } from "./models";
 
-/** Mirrors the filters the site's own catalogue page sends to the API. */
 export class MangaHubSearchForm extends AdvancedSearchForm {
   private genres: string[];
   private hideNSFW: boolean;
@@ -37,8 +36,7 @@ export class MangaHubSearchForm extends AdvancedSearchForm {
         {
           id: "genres",
           header: "Genres",
-          // Verified against the API: asking for two genres returns more rows
-          // than asking for one, so the filter widens rather than narrows.
+          // The API ORs genres together, so each one added returns more rows.
           footer: "Titles match any selected genre, so adding genres widens the results.",
         },
         [
@@ -83,9 +81,8 @@ export class MangaHubSearchForm extends AdvancedSearchForm {
       Section({ id: "notes" }, [
         LabelRow("status", {
           title: "Status",
-          // The schema accepts a Status argument but the resolver ignores it:
-          // every value returns the same rows with mixed statuses, so offering
-          // it would be a control that does nothing.
+          // The schema takes a Status argument but the resolver ignores it -
+          // every value returns the same mixed rows.
           subtitle: "The site's API ignores status filtering, so it is not offered.",
         }),
       ]),
@@ -93,8 +90,8 @@ export class MangaHubSearchForm extends AdvancedSearchForm {
   }
 
   override getSearchQueryMetadata(): MangaHubSearchMetadata {
-    // Only defined keys are carried: an explicit undefined member cannot be
-    // serialised across the bridge.
+    // An explicit undefined member cannot be serialised across the bridge, so
+    // only set keys are included.
     return {
       ...(this.genres.length > 0 ? { genres: this.genres } : {}),
       ...(this.hideNSFW ? { hideNSFW: true } : {}),

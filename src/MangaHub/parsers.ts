@@ -15,16 +15,10 @@ import {
   type ApiManga,
 } from "./models";
 
-/** The catalogue's slug for each genre, looked up by display name. */
 const GENRE_SLUGS = new Map(GENRES.map((genre) => [genre.title.toLowerCase(), genre.id]));
 
-/**
- * Turns a genre name into a usable tag id.
- *
- * An id may only hold alphanumerics and `._-@()[]%?#+=/&:`, so a name such as
- * "Martial Arts" is rejected outright and takes the whole title with it. The
- * catalogue's own slug is preferred so the id also matches the search filter.
- */
+// Ids allow only alphanumerics and `._-@()[]%?#+=/&:`, so a name like "Martial
+// Arts" fails the whole title. The catalogue slug also matches the search filter.
 export function genreId(name: string): string {
   const known = GENRE_SLUGS.get(name.toLowerCase());
   if (known) {
@@ -40,12 +34,8 @@ export function genreId(name: string): string {
   return slug || "unknown";
 }
 
-/**
- * Covers arrive as a bare path such as `mh/eleceed.jpg`.
- *
- * Some titles have none at all, and an empty string is not a URL the app will
- * accept, so those fall back to a placeholder rather than being emitted blank.
- */
+// Covers arrive as a bare path such as `mh/eleceed.jpg`, and some titles have
+// none - an empty string is not a URL the app accepts.
 export function coverUrl(image: string | null | undefined): string {
   const path = (image ?? "").trim();
 
@@ -61,8 +51,7 @@ export function contentRatingOf(manga: ApiManga): ContentRating {
     return ContentRating.ADULT;
   }
 
-  // Listing rows only carry `isSafe`, so anything not flagged safe is treated
-  // as mature rather than assumed harmless.
+  // Listing rows only carry `isSafe`, so treat anything unflagged as mature.
   return manga.isSafe ? ContentRating.EVERYONE : ContentRating.MATURE;
 }
 
@@ -71,7 +60,7 @@ function statusOf(raw: string | null | undefined): string {
   return STATUS_LABELS[key] ?? (key ? key.charAt(0).toUpperCase() + key.slice(1) : "Unknown");
 }
 
-/** `genres` is a comma-separated string rather than a list. */
+// `genres` is a comma-separated string, not a list.
 export function splitGenres(raw: string | null | undefined): string[] {
   return (raw ?? "")
     .split(",")
@@ -79,12 +68,8 @@ export function splitGenres(raw: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
-/**
- * `alternativeTitle` is a semicolon-separated string.
- *
- * Anything that is not a usable string is dropped: a non-string reaching
- * `secondaryTitles` fails to cross the bridge and takes the title with it.
- */
+// `alternativeTitle` is a semicolon-separated string, and a non-string reaching
+// `secondaryTitles` fails the whole title.
 export function splitAlternativeTitles(raw: string | null | undefined): string[] {
   const titles: string[] = [];
 
@@ -144,7 +129,7 @@ export function parseMangaDetails(manga: ApiManga): SourceManga {
   };
 }
 
-/** The API lists chapters oldest first; the app shows them newest first. */
+// The API lists chapters oldest first; the app wants newest first.
 export function parseChapters(rows: ApiChapter[], sourceManga: SourceManga): Chapter[] {
   const sorted = [...rows].sort((a, b) => b.number - a.number);
 
@@ -152,7 +137,7 @@ export function parseChapters(rows: ApiChapter[], sourceManga: SourceManga): Cha
     const published = row.date ? new Date(row.date) : undefined;
 
     return {
-      // The reader is addressed by chapter number, so that is the stable id.
+      // The reader endpoint is addressed by chapter number, not by any row id.
       chapterId: String(row.number),
       sourceManga,
       langCode: "en",
@@ -164,12 +149,8 @@ export function parseChapters(rows: ApiChapter[], sourceManga: SourceManga): Cha
   });
 }
 
-/**
- * Builds page URLs from the reader payload.
- *
- * `pages` is a JSON *string* holding a shared path and the file name of each
- * page, which are joined onto the image CDN.
- */
+// `pages` is a JSON string, not an object: `p` is a shared path prefix and `i`
+// the file name of each page.
 export function parseChapterPages(chapter: ApiChapterFull): string[] {
   const raw = chapter.pages;
   if (!raw) {

@@ -33,34 +33,13 @@ import {
   type KavitaLibrary,
 } from "./models";
 
-/** What a sign-in tells us, once the server has accepted it. */
 export interface SignInResult {
   user: string;
   libraries: KavitaLibrary[];
 }
 
-/**
- * Where a reader points this source at their own Kavita.
- *
- * Every other source in this repository reads one site at a fixed address.
- * Kavita is a server its owner runs, so there is no address to ship: it is
- * whatever machine the reader put it on, reachable only by them, and the
- * account is theirs alone.
- *
- * Kavita will take either an account or an API key, and neither is the right
- * answer for everyone. A key is narrow and can be revoked on its own, which
- * suits handing one device a way in; but Kavita issues keys with an expiry, so
- * a key will eventually stop working with no warning beyond a failed request.
- * An account does not lapse and needs nothing copied across, at the cost of
- * being the whole account rather than a revocable slice of it.
- *
- * So the reader picks, and the pick is stored. The two are never tried in turn:
- * a half-filled account would then quietly sign in by key, and a sign-in that
- * works for reasons the reader did not choose is worse than one that fails.
- *
- * Secrets are entered as secrets and kept in secure state, so neither is sitting
- * in ordinary settings alongside a screen brightness preference.
- */
+// The method is stored, never inferred: the two are not tried in turn, so a
+// half-filled account cannot quietly sign in by key instead.
 export class KavitaSettings extends Form {
   private server: string;
 
@@ -190,19 +169,13 @@ export class KavitaSettings extends Form {
     ];
   }
 
-  /**
-   * The address is kept as typed and tidied when it is used.
-   *
-   * Someone entering a server writes it the way they open it - with a trailing
-   * slash, or without a scheme - and correcting the field underneath them while
-   * they are still typing is worse than accepting it and tidying it later.
-   */
+  // Stored as typed and tidied at use, so the field is not rewritten under
+  // someone mid-way through typing an address.
   async serverChanged(value: string): Promise<void> {
     this.server = value;
     Application.setState(value, SERVER_KEY);
   }
 
-  /** Switching method redraws the form, so only the fields in use are asked for. */
   async modeChanged(value: string[]): Promise<void> {
     this.mode = value[0] === MODE_API_KEY ? MODE_API_KEY : MODE_PASSWORD;
     this.ok = false;
@@ -232,7 +205,6 @@ export class KavitaSettings extends Form {
     Application.setSecureState(value, API_KEY);
   }
 
-  /** What the current form adds up to, or nothing if it is not filled in yet. */
   private credentials(): KavitaCredentials | undefined {
     const server = normaliseServer(this.server);
 
@@ -251,13 +223,8 @@ export class KavitaSettings extends Form {
       : undefined;
   }
 
-  /**
-   * Asks the server whether these details work, and says what it answered.
-   *
-   * A wrong address, a refused sign-in and an account that can see nothing all
-   * fail the same way once browsing starts - an empty shelf - so it is worth
-   * being able to ask here and be told which it was.
-   */
+  // A wrong address, a refused sign-in and an account that can see nothing all
+  // look the same while browsing - an empty shelf.
   async testConnection(): Promise<void> {
     const credentials = this.credentials();
 

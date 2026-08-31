@@ -3,22 +3,17 @@
 
 import type { SortingOption, Tag } from "@paperback/types";
 
-/**
- * Carried between pages of results, and produced by the advanced search form.
- *
- * `genre` holds a slug from {@link GENRES}. When it is set the extension
- * browses `/manga-list/<genre>` instead of `/list-manga`, because the site
- * exposes genre filtering as a path rather than a query parameter.
- */
+// A `genre` slug means browsing `/manga-list/<genre>` instead of `/list-manga`:
+// the site filters genres by path, not by query parameter.
 export type Manga18SearchMetadata = {
   page?: number;
   genre?: string;
   completed?: boolean;
 };
 
-/** `id` maps to the site's `order_by` query parameter. */
+// `id` is the site's `order_by` value.
 export const SORTING_OPTIONS: SortingOption[] = [
-  // Not a typo on our end - the site spells the parameter this way.
+  // Not a typo on our end - the site spells it this way.
   { id: "lastest", label: "Latest" },
   { id: "views", label: "Most Views" },
   { id: "name", label: "A-Z" },
@@ -26,21 +21,13 @@ export const SORTING_OPTIONS: SortingOption[] = [
 
 export const DEFAULT_SORT = "lastest";
 
-/** How long a fetched genre list is reused before being refreshed. */
 export const GENRE_CACHE_TTL = 24 * 60 * 60 * 1000;
 export const GENRE_STATE_KEY = "manga18.genres";
 
-/** The nav menu that lists every genre the site browses by. */
 export const GENRE_MENU_SELECTOR = "div.sub-menu a[href*='/manga-list/']";
 
-/**
- * Fallback genre list, captured from the site's own navigation menu.
- *
- * The live list is read from that menu at runtime and cached; this is only
- * what the filter falls back to when that request fails. Slugs are kept
- * verbatim because their casing is inconsistent (`Ecchi` alongside `action`)
- * and the paths are case sensitive.
- */
+// Only used when the live menu can't be fetched. Keep the slug casing verbatim:
+// it is inconsistent (`Ecchi` next to `action`) and the paths are case sensitive.
 export const GENRES: Tag[] = [
   { id: "18", title: "18+" },
   { id: "action", title: "Action" },

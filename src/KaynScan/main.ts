@@ -38,25 +38,14 @@ import { KaynInterceptor } from "./network";
 import { parseBook, parseChapters, parsePages } from "./parsers";
 import pbconfig from "./pbconfig";
 
-/**
- * Which chapters have to be paid for.
- *
- * Learned while listing a series and read when one is opened, so a locked
- * chapter can be refused by name instead of looking like an empty one.
- */
+// Filled in while listing a series, read back when a chapter is opened.
 const lockedChapters = new Set<string>();
 
 const lockKey = (slug: string, number: string): string => `${slug}#${number}`;
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/**
- * The day a paid chapter stops being paid, as the reader's own clock sees it.
- *
- * The site states this as an instant in UTC and shows it in local time, so a
- * chapter that frees just after midnight reads as the next day - which is what
- * the site itself displays, and what a reader waiting for it expects.
- */
+// Local time on purpose: it has to match the date the site shows the reader.
 function freeOn(iso: string | null | undefined): string {
   const when = new Date(iso ?? "");
 
@@ -67,14 +56,7 @@ function freeOn(iso: string | null | undefined): string {
   return `${when.getDate()} ${MONTHS[when.getMonth()] ?? ""}`;
 }
 
-/**
- * How a paid chapter is marked.
- *
- * The app already prints "Ch. 21 - " before this, and the row it prints into is
- * narrow, so the number is not repeated and the price is left out: what a reader
- * scanning the list wants to know is that it is shut and when it opens. A lock
- * reads at a glance where the word would not fit.
- */
+// The app prints "Ch. 21 - " ahead of this in a narrow row, so keep it to the lock and a date.
 function lockedTitle(row: { becomesFreeAt?: string | null }): string {
   const free = freeOn(row.becomesFreeAt);
 
@@ -89,7 +71,7 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfig> {
   }
 
   async cloudflareBypassCompleted(_request: Request, _cookies: Cookie[]): Promise<void> {
-    // The app keeps the cookies its bypass collected; nothing to store here.
+    // The app keeps the bypass cookies itself; nothing to store here.
   }
 
   private async json<T>(url: string): Promise<T> {
@@ -104,7 +86,6 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfig> {
     return Application.arrayBufferToUTF8String(buffer);
   }
 
-  /** A series as the app lists it. */
   private toResult(series: KaynSeries): SearchResultItem {
     const slug = (series.urlSlug ?? series.slug ?? "").trim();
     const chapters = series._count?.chapters ?? 0;
@@ -274,11 +255,7 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfig> {
         sourceManga,
         langCode: "en",
         chapNum: Number(number),
-        // A paid chapter is listed rather than hidden, so a reader can see that
-        // it exists, and says what it costs rather than opening to nothing. The
-        // site also shows a date these unlock on; that is worked out in its own
-        // page script and appears nowhere in the data this can read, so it is
-        // not invented here.
+        // Paid chapters are listed rather than hidden, marked so they don't open to nothing.
         ...(row.isLocked ? { title: lockedTitle(row) } : {}),
       });
     }

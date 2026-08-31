@@ -13,14 +13,8 @@ const SESSION_STATE_KEY = "hiperdex.session";
 export class HiperDexInterceptor extends PaperbackInterceptor {
   private readonly domain: string;
 
-  /**
-   * The site's own session cookies, kept by name and value.
-   *
-   * Every API procedure answers 401 without them, so they are tracked here
-   * rather than left to the shared cookie store: that store keys entries on an
-   * expiry date, and a session cookie is worth holding on to regardless of how
-   * its lifetime parses.
-   */
+  // Every API procedure answers 401 without these. Tracked here rather than in
+  // the shared cookie store, which drops entries by expiry date.
   private session: Record<string, string>;
 
   constructor(id: string, domain: string) {
@@ -32,12 +26,10 @@ export class HiperDexInterceptor extends PaperbackInterceptor {
       stored && typeof stored === "object" ? { ...(stored as Record<string, string>) } : {};
   }
 
-  /** True once the site has issued a session cookie. */
   get hasSession(): boolean {
     return Object.keys(this.session).length > 0;
   }
 
-  /** The tracked cookies, by name, for seeding a webview. */
   get sessionCookies(): Readonly<Record<string, string>> {
     return { ...this.session };
   }
@@ -55,7 +47,7 @@ export class HiperDexInterceptor extends PaperbackInterceptor {
         : "application/json,text/plain,*/*",
     };
 
-    // Images are served from a separate host that never sees these cookies.
+    // Images come from a separate host that never sees these cookies.
     if (!isImage && this.hasSession) {
       request.cookies = { ...request.cookies, ...this.session };
     }
@@ -78,10 +70,8 @@ export class HiperDexInterceptor extends PaperbackInterceptor {
         ));
 
     if (challenged) {
-      // Point every challenge at the domain root rather than the URL that
-      // happened to fail. Rails, covers and pages fail together, and a shared
-      // resolution URL lets the app collapse them into one prompt instead of
-      // stacking a separate bypass per request.
+      // Point every challenge at the domain root, never the URL that failed:
+      // one shared URL collapses concurrent failures into a single prompt.
       throw new CloudflareError(
         {
           url: this.domain,
@@ -95,8 +85,7 @@ export class HiperDexInterceptor extends PaperbackInterceptor {
       );
     }
 
-    // 401 and 403 carry a JSON body the API client interprets, so they are
-    // passed through rather than raised here.
+    // 401 and 403 carry a JSON body the API client reads, so let them through.
     if (response.status !== 200 && response.status !== 401 && response.status !== 403) {
       throw new Error(`Request failed with status ${response.status}: ${request.url}`);
     }
@@ -104,7 +93,6 @@ export class HiperDexInterceptor extends PaperbackInterceptor {
     return data;
   }
 
-  /** Records any cookie the site sets, and forgets the ones it clears. */
   private rememberSession(response: Response): void {
     let changed = false;
 
@@ -119,7 +107,7 @@ export class HiperDexInterceptor extends PaperbackInterceptor {
           changed = true;
         }
       } else if (cookie.name in this.session) {
-        // An empty value is how a server clears a cookie.
+        // An empty value is how the server clears a cookie.
         delete this.session[cookie.name];
         changed = true;
       }
@@ -130,7 +118,6 @@ export class HiperDexInterceptor extends PaperbackInterceptor {
     }
   }
 
-  /** Stores a cookie collected by the Cloudflare bypass webview. */
   setCookie(name: string, value: string): void {
     if (!name || !value || this.session[name] === value) {
       return;

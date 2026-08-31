@@ -3,14 +3,8 @@
 
 export const DOMAIN = "https://www.zinmanga.net";
 
-/**
- * Paths are written without a trailing slash, deliberately.
- *
- * `/manga/{slug}/` is answered with a 301 to the same path on plain **http**,
- * which iOS refuses to follow at all - the request fails outright as an App
- * Transport Security error and the page never loads. Without the slash the page
- * is served directly, over the connection it was asked for.
- */
+// No trailing slash: `/manga/{slug}/` 301s to the same path on plain http,
+// which iOS refuses to follow (App Transport Security), so the page never loads.
 export const seriesUrl = (slug: string): string => `${DOMAIN}/manga/${slug}`;
 
 export const chapterUrl = (slug: string, chapterSlug: string): string =>
@@ -19,7 +13,6 @@ export const chapterUrl = (slug: string, chapterSlug: string): string =>
 export const chaptersApiUrl = (slug: string): string =>
   `${DOMAIN}/api/comics/${encodeURIComponent(slug)}/chapters?per_page=-1&order=desc`;
 
-/** One chapter, as the site's own reader asks for it. */
 export interface ZinChapter {
   chapter_id?: number;
   chapter_num?: number | string | null;
@@ -29,13 +22,11 @@ export interface ZinChapter {
   view?: number | null;
 }
 
-/** What the chapter endpoint answers with. */
 export interface ZinChapterPage {
   success?: boolean;
   data?: { chapters?: ZinChapter[]; total?: number };
 }
 
-/** Paging and filter state carried between pages of results. */
 export type ZinSearchMetadata = {
   page?: number;
   completed?: boolean;
@@ -43,7 +34,6 @@ export type ZinSearchMetadata = {
   seen?: string[];
 };
 
-/** The orderings the site's own listing offers. */
 export const SORTS: { id: string; label: string }[] = [
   { id: "relevance", label: "Relevance" },
   { id: "latest", label: "Latest" },
@@ -53,14 +43,8 @@ export const SORTS: { id: string; label: string }[] = [
   { id: "alphabet", label: "A-Z" },
 ];
 
-/**
- * The rows on the discover page, and the ordering behind each.
- *
- * Each was checked against the others: no two return the same titles. The
- * theme's usual "New Series" row is not among them - `new-manga` and `latest`
- * share eight of their twelve titles, because a series added this week is also
- * one updated this week.
- */
+// No "New Series" row on purpose: `new-manga` and `latest` return mostly the
+// same titles.
 export const ROWS: { id: string; title: string; ordering: string }[] = [
   { id: "most_popular", title: "Most Popular", ordering: "views" },
   { id: "recently_updated", title: "Recently Updated", ordering: "latest" },
@@ -68,5 +52,4 @@ export const ROWS: { id: string; title: string; ordering: string }[] = [
   { id: "top_rated", title: "Highest Rated", ordering: "rating" },
 ];
 
-/** How many already-shown titles a row remembers while it is scrolled. */
 export const SEEN_LIMIT = 360;

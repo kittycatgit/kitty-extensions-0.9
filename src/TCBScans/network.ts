@@ -10,12 +10,6 @@ import {
 
 import { DOMAIN, USER_AGENT } from "./models";
 
-/**
- * Headers and bot verification - nothing else.
- *
- * The site serves plain pages and its artwork off an ordinary content host,
- * with nothing signed, counted or rationed, so there is no pacing to do here.
- */
 export class TCBScansInterceptor extends PaperbackInterceptor {
   override async interceptRequest(request: Request): Promise<Request> {
     request.headers = {
@@ -38,8 +32,7 @@ export class TCBScansInterceptor extends PaperbackInterceptor {
       (response.status === 403 &&
         /just a moment|challenge-platform|cf-chl/i.test(Application.arrayBufferToUTF8String(data)));
 
-    // One challenge, raised against the site itself rather than whichever page
-    // happened to meet it - asking per page stacks several at once.
+    // Challenge DOMAIN, never request.url: per-page challenges stack up on the user.
     if (challenged) {
       throw new CloudflareError(
         {

@@ -13,14 +13,7 @@ import {
 
 import type { ZinSearchMetadata } from "./models";
 
-/**
- * The site's genre filter, offered as the site publishes it.
- *
- * The list is read from the site's own search page rather than written down
- * here, so a genre added tomorrow appears without this extension being touched.
- * A title matching any chosen genre is returned, which is how the site's filter
- * behaves - choosing more widens the search rather than narrowing it.
- */
+// Options are read from the site's search page at runtime, not listed here.
 export class ZinSearchForm extends AdvancedSearchForm {
   private readonly options: Tag[];
 
@@ -71,8 +64,7 @@ export class ZinSearchForm extends AdvancedSearchForm {
   }
 
   override getSearchQueryMetadata(): ZinSearchMetadata {
-    // Only keys with a value are carried: an explicit undefined cannot cross
-    // the bridge.
+    // An explicit undefined cannot cross the bridge, so omit empty keys.
     return this.genres.length > 0 ? { genres: this.genres } : {};
   }
 }

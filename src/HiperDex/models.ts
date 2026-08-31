@@ -3,7 +3,6 @@
 
 import { ContentRating, type SortingOption, type Tag } from "@paperback/types";
 
-/** Paging and filter state carried between pages of results. */
 export type HiperDexSearchMetadata = {
   offset?: number;
   page?: number;
@@ -16,12 +15,11 @@ export type HiperDexSearchMetadata = {
   completed?: boolean;
 };
 
-/** Shapes returned by the site's tRPC API, narrowed to the fields used here. */
 export type ApiSeries = {
   id: number;
   slug: string;
   title: string;
-  /** A JSON-encoded array on the detail route, a real array on search hits. */
+  // A JSON-encoded array on the detail route, but a real array on search hits.
   alternativeTitles?: string | string[] | null;
   synopsis?: string | null;
   coverUrl?: string | null;
@@ -71,11 +69,7 @@ export type ApiLatestItem = {
   chapters?: { id: number; number: number; title?: string | null; createdAt?: string | null }[];
 };
 
-/**
- * Values accepted by the API's own schema. Anything outside these is rejected
- * with a validation error rather than silently ignored, so the lists below are
- * the server's vocabulary rather than a guess.
- */
+// The API rejects any sort id outside this list with a validation error.
 export const SORTING_OPTIONS: SortingOption[] = [
   { id: "recent", label: "Recently Updated" },
   { id: "newest", label: "Newest" },
@@ -88,28 +82,16 @@ export const SORTING_OPTIONS: SortingOption[] = [
 
 export const DEFAULT_SORT = "recent";
 
-/**
- * Page sizes per procedure, taken from what each one's schema accepts.
- *
- * `search.query` allows up to 100 and `recommendations.trending` rejects
- * anything above 20 outright, so these are limits rather than preferences.
- */
+// search.query caps limit at 100; recommendations.trending rejects anything over 20.
 export const PAGE_SIZE = 30;
 export const TRENDING_PAGE_SIZE = 20;
 export const LATEST_PAGE_SIZE = 40;
 
-/** Widest rating the API will return; the app does its own filtering per item. */
+// Widest rating the API will return; the app filters per item afterwards.
 export const MAX_RATING = "pornographic";
 
-/**
- * Chapter counts for search results.
- *
- * The search procedure returns no chapter information at all - only the series
- * itself, its rating and its genres - so a count has to be asked for per
- * series. They are fetched for a whole page of results in one batched request
- * and kept, since a series' length changes rarely and the same titles come back
- * on every repeat search and every scroll.
- */
+// Search results carry no chapter information, so counts are fetched separately
+// for a whole page at a time and cached.
 export const CHAPTER_COUNT_TTL_MS = 12 * 60 * 60_000;
 export const CHAPTER_COUNT_MAX = 400;
 export const CHAPTER_COUNT_KEY = "hiperdex.chapterCounts";
@@ -135,7 +117,6 @@ export const CONTENT_RATING_OPTIONS: Tag[] = [
   { id: "pornographic", title: "Pornographic" },
 ];
 
-/** Home rails mirror the site's own trending periods plus its update feed. */
 export const TRENDING_SECTIONS: { id: string; title: string; period: string }[] = [
   { id: "trending-day", title: "Trending Today", period: "day" },
   { id: "trending-week", title: "Trending This Week", period: "week" },
@@ -154,7 +135,6 @@ export const STATUS_LABELS: Record<string, string> = {
   hiatus: "Hiatus",
 };
 
-/** The API's rating vocabulary mapped onto the app's three tiers. */
 export const CONTENT_RATINGS: Record<string, ContentRating> = {
   safe: ContentRating.EVERYONE,
   suggestive: ContentRating.MATURE,
@@ -162,20 +142,13 @@ export const CONTENT_RATINGS: Record<string, ContentRating> = {
   pornographic: ContentRating.ADULT,
 };
 
-/** A genre as the API lists it. */
 export type ApiGenre = { id: number; name: string; slug: string };
 
-/** How long a fetched genre list is reused before being refreshed. */
 export const GENRE_CACHE_TTL = 24 * 60 * 60 * 1000;
 export const GENRE_STATE_KEY = "hiperdex.genres";
 
-/**
- * Fallback genre list, captured from `search.genres`.
- *
- * The live list is fetched and cached at runtime; this is what the filter and
- * the genre rail fall back to when that request fails, and it is also the
- * name-to-slug map the detail parser uses to build valid tag ids.
- */
+// Used when the live genre list can't be fetched, and as the name-to-slug map
+// the detail parser needs to build valid tag ids.
 export const GENRES: Tag[] = [
   { id: "4-koma", title: "4-Koma" },
   { id: "action", title: "Action" },

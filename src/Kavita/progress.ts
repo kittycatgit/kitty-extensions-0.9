@@ -3,21 +3,11 @@
 
 import { ButtonRow, Form, LabelRow, Section, type FormSectionElement } from "@paperback/types";
 
-/** What the server can be told about a whole series at once. */
 export interface ProgressActions {
   markRead: () => Promise<void>;
   markUnread: () => Promise<void>;
 }
 
-/**
- * Where a reader sets a whole series read or unread on their own server.
- *
- * Paperback keeps its own record of what has been read and sends chapters over
- * as they are finished. This form is the coarser instrument beside that: it
- * tells Kavita about the series as a whole, which is what fixes a shelf that
- * has drifted out of step rather than waiting for it to catch up chapter by
- * chapter.
- */
 export class KavitaProgressForm extends Form {
   private readonly title: string;
 
@@ -62,7 +52,6 @@ export class KavitaProgressForm extends Form {
     await this.run(this.actions.markUnread, "Marked as unread on Kavita.");
   }
 
-  /** Runs one of them and says what happened, rather than failing silently. */
   private async run(action: () => Promise<void>, done: string): Promise<void> {
     this.status = "Telling Kavita…";
     this.reloadForm();

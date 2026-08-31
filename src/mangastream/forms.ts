@@ -84,15 +84,6 @@ export class MangaStreamSettings extends Form {
   }
 }
 
-/**
- * The site's own filters, as the site publishes them.
- *
- * The theme puts four dropdowns above its listing - genres, status, type and
- * ordering - and every one of them is read off the page rather than written
- * down here, so a genre added tomorrow appears without this being touched.
- * Genres narrow together; the other three take one choice each, which is all
- * the listing understands.
- */
 export class MangaStreamSearchForm extends AdvancedSearchForm {
   private readonly sections: TagSection[];
 
@@ -113,7 +104,6 @@ export class MangaStreamSearchForm extends AdvancedSearchForm {
     this.order = filters?.order ? [filters.order] : [];
   }
 
-  /** The tags of one dropdown, by the name the parser gives that dropdown. */
   private itemsFor(title: string): { id: string; title: string }[] {
     const section = this.sections.find((candidate) => candidate.title === title);
 
@@ -133,8 +123,7 @@ export class MangaStreamSearchForm extends AdvancedSearchForm {
           value: this.genres,
           items: genres,
           minItemCount: 0,
-          // Every genre at once is a pointless search but a legitimate one, and
-          // the row needs a number rather than being left to guess.
+          // Must be at least 1, even when the page listed no genres at all.
           maxItemCount: Math.max(genres.length, 1),
           onValueChange: closureSelector(this, "genres", async (value: string[]) => {
             this.genres = value;
@@ -195,12 +184,7 @@ export class MangaStreamSearchForm extends AdvancedSearchForm {
   }
 }
 
-/**
- * The value the site expects, out of the id the parser built.
- *
- * The parser labels a tag with the dropdown it came from - "genres_4" - so the
- * listing gets "4", which is what its own form would have sent.
- */
+// The parser prefixes tag ids with their dropdown ("genres_4"); the listing wants "4".
 export function valueOf(id: string): string {
   const separator = id.indexOf("_");
   return separator === -1 ? id : id.slice(separator + 1);

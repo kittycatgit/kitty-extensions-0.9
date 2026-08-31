@@ -49,17 +49,6 @@ import pbconfig from "./pbconfig";
 import { KavitaProgressForm } from "./progress";
 import { KavitaSettings } from "./settings";
 
-/**
- * The sign-in this source holds for the life of the extension.
- *
- * Either method ends the same way: the server hands back a token to use for
- * everything else, and a key to put in artwork addresses. Neither is stored -
- * the token is short-lived, and both are one request away from details that
- * are already saved.
- *
- * The fingerprint is what the settings were when this was made, so a reader
- * who edits them is signed in again rather than left on a stale token.
- */
 interface Session {
   fingerprint: string;
   server: string;
@@ -71,22 +60,16 @@ interface Session {
 
 let session: Session | undefined;
 
-/** What a sign-in was made from, for noticing when it no longer matches. */
+// Changes whenever the credentials do, so edited settings force a fresh sign-in
+// rather than leaving a stale token in place.
 function fingerprint(credentials: KavitaCredentials): string {
   return credentials.mode === MODE_API_KEY
     ? [credentials.server, credentials.mode, credentials.apiKey].join("\n")
     : [credentials.server, credentials.mode, credentials.username, credentials.password].join("\n");
 }
 
-/**
- * What the chapter listing already told us.
- *
- * Kavita's series-detail answer carries every chapter's page count, the volume
- * it belongs to and the series it came from - everything needed both to open a
- * chapter and to tell the server how far it was read. Asking chapter-info for
- * any of it again would be a second round trip for something already known, and
- * on some chapters that endpoint answers 500.
- */
+// All of this comes out of series-detail. Do not reach for chapter-info to get
+// it: that endpoint answers 500 on some chapters.
 interface ChapterFacts {
   pages: number;
   seriesId: number;
@@ -96,21 +79,13 @@ interface ChapterFacts {
 const chapterFacts = new Map<string, ChapterFacts>();
 const seriesFacts = new Map<string, { format: number; libraryId: number }>();
 
-/**
- * The discover rows are Kavita's own dashboard, not a set chosen here.
- *
- * A reader arranges their dashboard in Kavita - which rows, in which order,
- * hidden or shown - and this source asks the server for that arrangement and
- * mirrors it. A row's id carries the stream's own id and kind so that opening
- * one later needs no memory of this call.
- */
 const STREAM_PREFIX = "stream_";
 const NAV_PREFIX = "nav_";
 
 class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
   async initialise(): Promise<void> {
-    // Nothing to register. Every address this source hands over already carries
-    // the key it needs, so the app fetches artwork with nothing in its way.
+    // No interceptor needed: every URL handed to the app already carries the
+    // API key it needs.
   }
 
   async getSettingsForm(): Promise<KavitaSettings> {
@@ -127,7 +102,6 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
     });
   }
 
-  /** Signs in by whichever method the reader chose, or says why the server refused. */
   private async authenticate(credentials: KavitaCredentials): Promise<Session> {
     const byKey = credentials.mode === MODE_API_KEY;
     const [response, buffer] = byKey
@@ -145,9 +119,8 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
           }),
         });
 
-    // Kavita answers a key it does not know by throwing, which reaches us as a
-    // 500 whose body still says 401. Reading the body keeps a wrong key from
-    // being reported as an unreachable server.
+    // Kavita throws on an API key it does not know, so a bad key arrives as a
+    // 500 whose body still says 401.
     const text = Application.arrayBufferToUTF8String(buffer);
     const refused =
       response.status === 401 ||
@@ -180,8 +153,7 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
       username: (body.username ?? "").trim() || "your account",
       token: body.token,
       refresh: (body.refreshToken ?? "").trim(),
-      // A key the reader gave us is itself a key, so it can address artwork if
-      // the server did not name one in its answer.
+      // The reader's own API key stands in when the login reply names none.
       imageKey: imageKeyFrom(body, byKey ? credentials.apiKey : ""),
     };
 
@@ -190,15 +162,8 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
     return session;
   }
 
-  /**
-   * Picks up a sign-in the server already granted, without sending a password.
-   *
-   * This is not a fallback for a failed sign-in - it is the ordinary path, and
-   * signing in properly is what happens when there is nothing to resume. The
-   * point is what does *not* travel: the app records the body of every request
-   * in a log readers share when asking for help, so a launch that re-sends a
-   * password puts that password in every one of those logs.
-   */
+  // Preferred over signing in again: the app logs every request body, and those
+  // logs get shared when readers ask for help - so keep the password out of them.
   private async resume(credentials: KavitaCredentials): Promise<Session | undefined> {
     const kept = storedSession();
 
@@ -214,8 +179,7 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
     });
 
     if (response.status !== 200) {
-      // The refresh token has aged out or been revoked. Nothing is wrong; the
-      // caller signs in again.
+      // Refresh token aged out or was revoked; the caller signs in again.
       keepSession(undefined);
       return undefined;
     }
@@ -243,7 +207,6 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
     }
   }
 
-  /** The current sign-in, made if there is not one yet. */
   private async signedIn(): Promise<Session> {
     const credentials = requireSettings();
     const wanted = fingerprint(credentials);
@@ -257,18 +220,8 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
     return session;
   }
 
-  /**
-   * One call to the server.
-   *
-   * The token is put on the request here rather than by an interceptor. An
-   * interceptor that had to sign in would be issuing a request from inside the
-   * handling of one, and asking for a token is itself a request - so it would
-   * be waiting on the queue it was holding.
-   *
-   * A token that has aged out is signed in again and the call repeated once.
-   * The password behind it does not expire, so this is a thing that can be put
-   * right here rather than an error the reader has to go and act on.
-   */
+  // The token goes on here rather than in an interceptor - an interceptor that
+  // had to sign in would be waiting on the request queue it is holding.
   private async request<T>(
     path: string,
     where: { server: string; token: string },
@@ -309,12 +262,9 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
     }
   }
 
-  /** A series row as the app shows it in a list. */
   private toResult(series: KavitaSeries, server: string, imageKey: string): SearchResultItem {
-    // The recently-updated row carries both an id of its own and the series id,
-    // and its own is zero - so the first *usable* number wins rather than the
-    // first one present. Taking `id ?? seriesId` sent every one of those rows
-    // to series 0.
+    // Recently-updated rows carry both ids and their own `id` is 0, so take the
+    // first usable number - `id ?? seriesId` sends all of them to series 0.
     const id =
       [series.seriesId, series.id].find((value) => typeof value === "number" && value > 0) ?? 0;
     const read = series.pagesRead ?? 0;
@@ -383,21 +333,8 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
     };
   }
 
-  /**
-   * A series' chapters, newest first.
-   *
-   * Kavita keeps chapters inside volumes and also offers them already in
-   * reading order, which is what is used when the server gives it - that
-   * ordering is the server's own answer to specials, one-shots and volumes that
-   * carry no chapter number.
-   */
-  /**
-   * Every chapter of a series, as the server lists them.
-   *
-   * Kept apart from building the app's own chapters because reading progress
-   * needs what the server said - how far into each chapter the reader got -
-   * which the app's chapter has no room for.
-   */
+  // Returns the server's rows, not Chapters: progress needs the pagesRead a
+  // Chapter has no room for.
   private async rawChapters(mangaId: string): Promise<KavitaChapter[]> {
     const { server, token } = await this.signedIn();
     const detail = await this.request<KavitaSeriesDetail>(
@@ -405,6 +342,8 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
       { server, token },
     );
 
+    // storylineChapters is the server's own reading order, which already places
+    // specials, one-shots and volumes with no chapter number.
     const flat: KavitaChapter[] =
       detail?.storylineChapters && detail.storylineChapters.length > 0
         ? detail.storylineChapters
@@ -433,10 +372,9 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
     return rows;
   }
 
-  /** One chapter, as the app describes it. */
   private toChapter(row: KavitaChapter, sourceManga: SourceManga): Chapter {
-    // Kavita marks "this file has no chapter number of its own" with a very
-    // large negative number rather than an absent one.
+    // Kavita marks "no chapter number of its own" with a large negative number
+    // rather than leaving the field out.
     const raw = row.minNumber ?? Number(row.number ?? 0);
     const number = Number.isFinite(raw) && raw > -1000 ? raw : 0;
     const name = (row.titleName ?? "").trim() || (row.title ?? "").trim();
@@ -463,22 +401,13 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
       .sort((a, b) => b.chapNum - a.chapNum);
   }
 
-  /**
-   * A chapter's pages, as addresses the app fetches for itself.
-   *
-   * Kavita numbers pages from zero and says how many a chapter has, and each
-   * address carries the API key, so there is nothing left for this source to do
-   * once the list is handed over.
-   */
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
     const { server, imageKey, token } = await this.signedIn();
 
     const mangaId = chapter.sourceManga.mangaId;
 
-    // Both of these are normally already known from opening the series. A
-    // chapter reached without that - resumed from the library, say - fills them
-    // from the same endpoints the series page uses, rather than from
-    // chapter-info, which this source no longer calls at all.
+    // Both are usually cached from opening the series, but a chapter resumed
+    // from the library skips that.
     if (!chapterFacts.has(chapter.chapterId)) {
       await this.rawChapters(mangaId);
     }
@@ -517,13 +446,6 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
     return { id: chapter.chapterId, mangaId: chapter.sourceManga.mangaId, pages };
   }
 
-  /**
-   * How far the reader has got, according to the server.
-   *
-   * Kavita records progress per chapter, so the furthest chapter it has any
-   * progress for is the one to report. A series nobody has opened has none,
-   * which is not an error - it is the ordinary state of most of a library.
-   */
   async getMangaProgress(sourceManga: SourceManga): Promise<MangaProgress | undefined> {
     try {
       const rows = await this.rawChapters(sourceManga.mangaId);
@@ -541,23 +463,14 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
 
       return { sourceManga, lastReadChapter: this.toChapter(furthest, sourceManga) };
     } catch {
-      // Progress is something the app asks about in passing, so a server that
-      // cannot answer should leave the rest of the source working.
+      // Progress is a side question; a server that cannot answer it should not
+      // break the rest of the source.
       return undefined;
     }
   }
 
-  /**
-   * Tells the server what has been read.
-   *
-   * This is what keeps On Deck honest: Kavita decides what to put there from
-   * what it has been told is read, so a chapter finished in the app has to be
-   * sent back or the shelf never moves.
-   *
-   * Every action is answered for individually. The app retries what failed, so
-   * reporting a whole batch as lost because one chapter was refused would mean
-   * sending the rest a second time.
-   */
+  // Kavita builds On Deck from what it has been told is read, so chapters
+  // finished in the app have to be sent back or that shelf never moves.
   async processChapterReadActionQueue(
     actions: TrackedMangaChapterReadAction[],
   ): Promise<ChapterReadActionQueueProcessingResult> {
@@ -566,8 +479,8 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
     const bySeries = new Map<string, KavitaChapter[]>();
 
     for (const action of actions) {
-      // The tracked title's own id, not the id of whichever source the chapter
-      // was read from - `chapterMangaId` would be that other source's.
+      // The tracked title's own id; `chapterMangaId` would belong to whichever
+      // source the chapter was actually read from.
       const seriesId = action.sourceManga.mangaId;
 
       try {
@@ -577,10 +490,8 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
 
         const rows = bySeries.get(seriesId) ?? [];
 
-        // Read from this server, the action's chapter id is one of these. Added
-        // as a second source to a title read somewhere else, that id belongs to
-        // the other source and means nothing here - so the chapter number,
-        // which does carry across, finds it instead.
+        // The action's chapter id is only ours if the chapter was read here;
+        // for a title added as a second source, fall back to chapter number.
         const match =
           rows.find((row) => String(row.id) === action.chapterId) ??
           rows.find((row) => {
@@ -590,8 +501,6 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
           });
 
         if (!match?.id) {
-          // Nothing on this server answers to that chapter. The app counts the
-          // failure and backs off; calling it done would be a lie.
           failedItems.push(action.id);
           continue;
         }
@@ -648,7 +557,7 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
       { server, token },
     );
 
-    // The search endpoint answers in one go rather than in pages.
+    // The search endpoint answers in one go; it has no paging.
     return {
       items: (found?.series ?? []).map((series) => this.toResult(series, server, imageKey)),
       metadata: { completed: true },
@@ -663,8 +572,6 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
         server,
         token,
       }),
-      // Not even asked for when the rows are off, so the lighter Home is one
-      // request lighter too.
       showShelves
         ? this.request<KavitaSideNavStream[]>("/api/Stream/sidenav?visibleOnly=true", {
             server,
@@ -683,10 +590,8 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
         type: DiscoverSectionType.simpleCarousel,
       }));
 
-    // The side nav is the rest of the reader's arrangement - their libraries,
-    // everything they own, what they mean to read next. Every one of them is a
-    // page of series fetched the moment Home is opened, so they are shown only
-    // when asked for.
+    // Each side-nav shelf costs a page of series the moment Home opens, so they
+    // are off unless asked for.
     const shelves = (nav ?? [])
       .filter((stream) => stream.visible !== false)
       .filter((stream) => navSource(stream.streamType ?? 0, stream.libraryId) !== undefined)
@@ -700,7 +605,6 @@ class KavitaExtension implements ExtensionImpl<typeof pbconfig> {
     return [...dashboard, ...shelves];
   }
 
-  /** Where a row's series come from, whichever part of Kavita it mirrors. */
   private sourceFor(sectionId: string): { path: string; body: unknown } | undefined {
     const dashboard = /^stream_\d+_(\d+)$/.exec(sectionId);
 

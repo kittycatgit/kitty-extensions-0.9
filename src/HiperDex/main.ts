@@ -52,35 +52,19 @@ import type pbconfigType from "./pbconfig";
 
 const DOMAIN = "https://hiperdex.tv";
 
-/**
- * Stand-in for a series with no artwork.
- *
- * An empty address is rejected outright, and because a row's items are
- * converted together one blank cover takes the whole row down with it. This is
- * a real address that holds no image, so the app falls through to its own
- * placeholder instead of being handed nothing.
- */
+// An empty imageUrl fails the whole row it is in, so point at a real URL that
+// serves no image and let the app draw its own placeholder.
 const FALLBACK_COVER = `${DOMAIN}/_no-cover.png`;
 
-/**
- * The reader route rejects any call that does not carry this header. Its name
- * and value are assembled at runtime by the site's bundle rather than appearing
- * as literals, so they cannot be read out of the script; this pair is what the
- * current deployment sends. If the site rotates it, {@link discoverReaderToken}
- * recovers the new pair from a webview and caches it.
- */
+// The reader route 403s without this header. The site builds the name and value
+// at runtime, so discoverReaderToken re-reads them when they rotate.
 const DEFAULT_READER_HEADER = "x-cfg-auth";
 const DEFAULT_READER_TOKEN = "yceqt7qgu004";
 const READER_TOKEN_STATE_KEY = "hiperdex.readerToken";
 
 type ReaderToken = { name: string; value: string };
 
-/**
- * Captures whichever `x-…-auth` header the app attaches to its own reader call.
- *
- * The injected source is wrapped in a function body, so it returns directly,
- * and the returned promise is awaited before the result comes back.
- */
+// Injected source is wrapped in a function body, so it needs a bare return.
 const TOKEN_DISCOVERY_SCRIPT = `
   return new Promise(function (resolve) {
     var settled = false;
@@ -168,8 +152,6 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
       throw new Error(`No title found for ${mangaId}`);
     }
 
-    // The chapter list is a separate call, but the count belongs on the detail
-    // page, so it is fetched here rather than left blank.
     let chapterCount: number | undefined;
     try {
       const chapters = await this.api.query<ApiChapter[]>("series.chapters", {
@@ -197,8 +179,8 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
     const mangaId = chapter.sourceManga.mangaId;
     const chapterNumber = Number(chapter.chapterId);
 
-    // The reader is keyed by number and id together, and the id is only in the
-    // chapter list, so it is resolved here rather than packed into chapterId.
+    // The reader needs the chapter id as well as its number, and only the
+    // chapter list carries the id.
     const series = await this.api.query<ApiSeries>("series.bySlugWithGenres", { slug: mangaId });
     const rows = await this.api.query<ApiChapter[]>("series.chapters", { seriesId: series.id });
     const row = (Array.isArray(rows) ? rows : []).find((entry) => entry.number === chapterNumber);
@@ -217,7 +199,6 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
         throw error;
       }
 
-      // The stored pair is stale, so recover the current one and try once more.
       const discovered = await this.discoverReaderToken(mangaId, chapterNumber);
 
       if (!discovered) {
@@ -244,12 +225,6 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
     return await this.api.query<ApiPage[]>("reader.chapterPages", input, { [name]: value });
   }
 
-  /**
-   * Loads the chapter in a webview and reads the auth header the app sends.
-   *
-   * Best effort: any failure returns undefined so the caller can report the
-   * refusal plainly rather than surfacing a webview error.
-   */
   private async discoverReaderToken(
     mangaId: string,
     chapterNumber: number,
@@ -275,19 +250,14 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
         return { name: token.name, value: token.value };
       }
     } catch {
-      /* fall through to the caller's plain error */
+      // best effort; the caller reports the refusal instead
     }
 
     return undefined;
   }
 
-  /**
-   * The catalogue's genre list, fetched once a day and cached.
-   *
-   * The site publishes its genres through the API, so they are read from there
-   * rather than frozen into the build; the bundled list is only a fallback for
-   * when that request fails, so the filter is never left empty.
-   */
+  // The site publishes its genres; the bundled GENRES list is only a fallback so
+  // the filter is never empty.
   private async genreTags(): Promise<Tag[]> {
     const cached = Application.getState(GENRE_STATE_KEY) as
       | { at?: number; genres?: Tag[] }
@@ -315,20 +285,14 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
         return genres;
       }
     } catch {
-      /* fall back to the bundled list below */
+      // fall back to the bundled list below
     }
 
     return cached?.genres && cached.genres.length > 0 ? cached.genres : GENRES;
   }
 
-  /**
-   * Turns genre slugs into the names the search filter matches on.
-   *
-   * Filter values are compared against the genre's display name, not its slug:
-   * a single-word genre works either way, but "age-gap" matches nothing where
-   * "Age Gap" matches. Slugs are still what the form and tag ids carry, since
-   * an id may not contain spaces.
-   */
+  // The search filter matches display names, not slugs: "age-gap" finds nothing
+  // where "Age Gap" works. Tag ids stay slugs because an id cannot hold spaces.
   private async genreNames(slugs: string[]): Promise<string[]> {
     const tags = await this.genreTags();
     const bySlug = new Map(tags.map((tag) => [tag.id, tag.title]));
@@ -408,15 +372,8 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
     };
   }
 
-  /**
-   * Chapter counts for a page of search hits, in one request.
-   *
-   * Search itself reports nothing about chapters, so each series has to be
-   * asked about; batching turns thirty questions into one round trip, and what
-   * comes back is kept for a while, since a series' length rarely changes and
-   * the same titles reappear on every scroll and every repeat search. A series
-   * that cannot be counted simply goes without - the result still shows.
-   */
+  // Search hits carry no chapter count, so it takes one query per series;
+  // batched into a single round trip and cached, since the same titles recur.
   private async chapterCounts(hits: ApiSeries[]): Promise<Map<number, number>> {
     const store =
       (Application.getState(CHAPTER_COUNT_KEY) as
@@ -460,7 +417,6 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
     });
 
     if (learned) {
-      // Keep only the newest entries, so this cannot grow without end.
       const trimmed = Object.entries(store)
         .sort(([, a], [, b]) => b.at - a.at)
         .slice(0, CHAPTER_COUNT_MAX);
@@ -542,8 +498,6 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
       return await this.latestUpdates(page);
     }
 
-    // Resolve the rail by its own id: falling through to a default would render
-    // the same titles under three different headings.
     const trending = TRENDING_SECTIONS.find((entry) => entry.id === section.id);
 
     if (!trending) {
@@ -557,8 +511,6 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
       period: trending.period,
     });
 
-    // Only the first rail is the hero banner; the rest share one carousel so the
-    // trending rails read as a set rather than three different-looking blocks.
     const items = (Array.isArray(rows) ? rows : []).map((row) =>
       section.id === TRENDING_SECTIONS[0]!.id
         ? {
@@ -622,7 +574,6 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
     };
   }
 
-  /** Cookies the webview should start from: the session plus anything stored. */
   private webViewCookies(): Cookie[] {
     const host = DOMAIN.replace(/^https?:\/\//, "");
     const seen = new Set<string>();
@@ -649,8 +600,8 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
       }
 
       this.cookieStorage.setCookie(cookie);
-      // Kept alongside the store so the clearance survives however its
-      // lifetime happens to parse.
+      // Also kept in the interceptor, which ignores expiry; the store can drop
+      // the clearance depending on how its lifetime parses.
       this.interceptor.setCookie(cookie.name, cookie.value);
     }
   }

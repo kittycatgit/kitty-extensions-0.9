@@ -49,7 +49,6 @@ class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
 
   private genreCache?: ToonTopRef[];
 
-  /** Pooled rows used for the locally ranked rails. */
   private pool?: { at: number; items: ToonTopItem[] };
 
   async initialise(): Promise<void> {
@@ -77,10 +76,7 @@ class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
     return buildId;
   }
 
-  /**
-   * Fetch a page's data payload. A stale build id yields a 404, so resolve it
-   * again once before giving up.
-   */
+  // A stale build id yields a 404, so resolve it again once before giving up.
   private async getPageProps<T>(path: string, query = ""): Promise<T> {
     for (const force of [false, true]) {
       const buildId = await this.getBuildId(force);
@@ -97,13 +93,8 @@ class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
     throw new Error(`Unable to load ${path}`);
   }
 
-  /**
-   * Build a pool to rank over.
-   *
-   * The `latest` listing is the source that matters: its rows carry real
-   * day/week view counters, whereas the precomputed home rails report zero for
-   * both. Home rails are folded in afterwards only to widen coverage.
-   */
+  // Only the `latest` rows carry real day/week view counts; the precomputed
+  // home rails report zero for both and are folded in just to widen coverage.
   private async getRankingPool(): Promise<ToonTopItem[]> {
     const cached = this.pool;
     if (cached && Date.now() - cached.at < 10 * 60 * 1000) {
@@ -429,7 +420,7 @@ class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
   }
 }
 
-/** `number` is usually present; fall back to the leading digits of the name. */
+// `number` is usually present; fall back to the leading digits of the name.
 function chapterNumber(entry: { number?: number; name: string }): number {
   if (typeof entry.number === "number" && !isNaN(entry.number)) {
     return entry.number;
@@ -439,7 +430,6 @@ function chapterNumber(entry: { number?: number; name: string }): number {
   return isNaN(parsed) ? 0 : parsed;
 }
 
-/** Rank value for a pooled row, tolerating the fields the site omits. */
 function scoreOf(item: ToonTopItem, by: keyof ToonTopStats | "rating"): number {
   if (by === "rating") {
     return item.rating ?? 0;

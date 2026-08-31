@@ -35,10 +35,8 @@ import { ZinMangaInterceptor } from "./network";
 import { parseGenres, parsePages, parseResults, parseSeries } from "./parsers";
 import pbconfig from "./pbconfig";
 
-/** How long the genre list is reused before it is read from the site again. */
 const GENRES_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** The genre list as last read, held for the life of the extension. */
 let genreCache: { at: number; genres: Tag[] } | undefined;
 
 class ZinMangaExtension implements ExtensionImpl<typeof pbconfig> {
@@ -49,11 +47,9 @@ class ZinMangaExtension implements ExtensionImpl<typeof pbconfig> {
   }
 
   async cloudflareBypassCompleted(_request: Request, _cookies: Cookie[]): Promise<void> {
-    // The cookies the bypass collected are kept by the app's own cookie store
-    // and sent with later requests; there is nothing for this source to hold.
+    // The app's own cookie store keeps the bypass cookies; nothing to hold here.
   }
 
-  /** One page of markup, parsed. */
   private async document(url: string): Promise<cheerio.CheerioAPI> {
     const [, buffer] = await Application.scheduleRequest({ url, method: "GET" });
 
@@ -64,15 +60,9 @@ class ZinMangaExtension implements ExtensionImpl<typeof pbconfig> {
     return parseSeries(await this.document(seriesUrl(mangaId)), mangaId);
   }
 
-  /**
-   * A series' chapters, newest first.
-   *
-   * Read from the endpoint the site's own reader calls rather than from the
-   * series page, which ships a spinner where the list should be. Every way the
-   * theme normally lists chapters answers 404 here. `per_page=-1` is the site's
-   * own "all of them": the longest series arrives in one reply of 1703 chapters
-   * rather than eighteen pages of a hundred.
-   */
+  // The series page ships a spinner where the chapter list should be, and every
+  // route the theme normally lists chapters from answers 404 here, so read the
+  // endpoint the site's own reader calls. `per_page=-1` is its "all of them".
   async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
     const [, buffer] = await Application.scheduleRequest({
       url: chaptersApiUrl(sourceManga.mangaId),
@@ -95,9 +85,8 @@ class ZinMangaExtension implements ExtensionImpl<typeof pbconfig> {
     for (const row of rows) {
       const chapterId = (row.chapter_slug ?? "").trim();
 
-      // Without its own path segment a chapter cannot be opened, and the site
-      // lists a few twice under one slug - four of the 1703 on its longest
-      // series - which would show as duplicate rows with split read state.
+      // The site lists a few chapters twice under one slug, which would show as
+      // duplicate rows with split read state.
       if (!chapterId || seen.has(chapterId)) {
         continue;
       }
@@ -110,7 +99,7 @@ class ZinMangaExtension implements ExtensionImpl<typeof pbconfig> {
       const published = row.updated_at ? new Date(row.updated_at) : undefined;
 
       // Nearly every chapter is named for its own number, which the app already
-      // shows; keeping that would print the number twice.
+      // shows, so keeping the name would print the number twice.
       const restates = new RegExp(
         `^(chapter|chap|ch|episode|ep|part|pt)?[\\s._#-]*${number}$`,
         "i",
@@ -141,12 +130,8 @@ class ZinMangaExtension implements ExtensionImpl<typeof pbconfig> {
     return { id: chapter.chapterId, mangaId: chapter.sourceManga.mangaId, pages };
   }
 
-  /**
-   * The search the site's own form performs.
-   *
-   * Written without a trailing slash before the query: `/page/2/?s=` is
-   * answered with a redirect onto plain http, which iOS refuses to follow.
-   */
+  // No trailing slash before the query: `/page/2/?s=` is answered with a
+  // redirect onto plain http, which iOS refuses to follow.
   private searchUrl(query: SearchQuery<ZinSearchMetadata>, page: number, sort?: string): string {
     const parts = [`s=${encodeURIComponent((query.title ?? "").trim())}`, "post_type=wp-manga"];
     const genres = (query.metadata as ZinSearchMetadata | undefined)?.genres ?? [];
@@ -185,7 +170,6 @@ class ZinMangaExtension implements ExtensionImpl<typeof pbconfig> {
     return SORTS.map((sort) => ({ id: sort.id, label: sort.label }));
   }
 
-  /** The genres the site filters by, read from its own search page. */
   private async genres(): Promise<Tag[]> {
     if (genreCache && Date.now() - genreCache.at < GENRES_TTL_MS) {
       return genreCache.genres;
@@ -212,8 +196,6 @@ class ZinMangaExtension implements ExtensionImpl<typeof pbconfig> {
     return ROWS.map((row, index) => ({
       id: row.id,
       title: row.title,
-      // The first row is the page's banner; the rest are its peers and are
-      // drawn alike, so rows showing the same kind of thing look alike.
       type: index === 0 ? DiscoverSectionType.featured : DiscoverSectionType.simpleCarousel,
     }));
   }
@@ -251,18 +233,9 @@ class ZinMangaExtension implements ExtensionImpl<typeof pbconfig> {
     };
   }
 
-  /**
-   * One page of a listing, and what to ask for next.
-   *
-   * The listing has no end: past the last real page the site clamps and serves
-   * that page again rather than answering 404, so a row scrolled to its end
-   * would repeat its last twelve covers forever. A page whose titles have all
-   * been seen already ends the row.
-   *
-   * Titles already shown are also dropped: "recently updated" is ordered by a
-   * moment that keeps moving, so a series updated between one page being read
-   * and the next arrives a second time.
-   */
+  // Past the last real page the site clamps and serves that page again rather
+  // than 404ing, so a row would repeat forever; an all-seen page ends it.
+  // Titles are deduped too, since "recently updated" reorders as pages are read.
   private paged(
     results: SearchResultItem[],
     page: number,

@@ -32,14 +32,8 @@ export function chapterIdFromHref(href: string | undefined): string | undefined 
   return href?.match(/\/read\/[^/]+\/([^/?#]+)/)?.[1];
 }
 
-/**
- * Finds the cover belonging to a card.
- *
- * The artwork is not inside the link: it sits in the card's own aspect-ratio
- * wrapper alongside it, so the anchor is checked first and then a couple of
- * enclosing levels. The walk is capped so a card can never borrow the cover of
- * the one next to it.
- */
+// The cover sits outside the anchor, in the card wrapper. Stop after two levels
+// up or a card picks up its neighbour's image.
 function coverNear($: CheerioAPI, link: ReturnType<CheerioAPI>): { src?: string; alt?: string } {
   const read = (scope: ReturnType<CheerioAPI>): { src?: string; alt?: string } | undefined => {
     const image = scope.find("img").first();
@@ -73,10 +67,9 @@ function coverNear($: CheerioAPI, link: ReturnType<CheerioAPI>): { src?: string;
   return own ?? {};
 }
 
-/** Alt text on some routes is suffixed with a label rather than being bare. */
 function cleanTitle(value: string | undefined): string | undefined {
   const cleaned = (value ?? "")
-    // Alt text is the title followed by a label: "… manga cover" or "… cover".
+    // Alt text is the title plus a label: "… manga cover" or "… cover".
     .replace(/\s*(?:manga\s*)?cover\s*$/i, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -85,14 +78,8 @@ function cleanTitle(value: string | undefined): string | undefined {
   return cleaned && !/^(read now|read|continue)$/i.test(cleaned) ? cleaned : undefined;
 }
 
-/**
- * Rows on the listing routes.
- *
- * A card links to its series from several anchors at once - a cover, a title
- * and a "Read Now" button - and the button comes first in document order. So
- * every anchor for a slug is folded together rather than trusting the first
- * one, which otherwise yields a row titled "Read Now" with no artwork.
- */
+// A card links to its series from the cover, the title and a "Read Now" button,
+// and the button comes first, so merge every anchor for a slug.
 export function parseListing($: CheerioAPI): SearchResultItem[] {
   const found = new Map<string, { title?: string; imageUrl?: string }>();
   const order: string[] = [];
@@ -163,8 +150,7 @@ export function parseMangaDetails($: CheerioAPI, mangaId: string): SourceManga {
     }
   }
 
-  // Author links share their markup with the section heading, so the heading
-  // text itself is skipped rather than being credited as a person.
+  // The "Authors" heading is itself an author link; skip it.
   const authors: string[] = [];
   for (const element of $('a[href*="/author"]').toArray()) {
     const name = $(element).text().replace(/\s+/g, " ").trim();
@@ -209,7 +195,6 @@ export function parseMangaDetails($: CheerioAPI, mangaId: string): SourceManga {
   };
 }
 
-/** Turns the site's relative dates ("11 months ago") into a date. */
 function parseRelativeDate(text: string): Date | undefined {
   const match = text.match(/(\d+)\s*(second|minute|hour|day|week|month|year)s?\s*ago/i);
 
@@ -232,7 +217,7 @@ function parseRelativeDate(text: string): Date | undefined {
   return ms ? new Date(Date.now() - amount * ms) : undefined;
 }
 
-/** Page counts are printed on each row, e.g. "21p". */
+// Rows print the page count as "21p".
 export function pageCountFromRow(text: string): number | undefined {
   const match = text.match(/(\d+)\s*p\b/i);
   return match ? Number(match[1]) : undefined;

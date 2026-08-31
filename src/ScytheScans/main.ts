@@ -26,17 +26,8 @@ import pbconfig from "./pbconfig";
 
 const DOMAIN_NAME: string = "https://scythescans.com";
 
-/**
- * Read the page list out of the reader.
- *
- * The chapter page ships no page images - a plain fetch returns only the
- * cover, with or without navigation headers. The theme's `ts_reader` library
- * arrives through the site's autoptimize bundles and is handed its sources at
- * runtime, so the list only exists once the page has actually run.
- *
- * The inject string is wrapped in a function body, so it must `return` its
- * value. A promise is awaited, which lets us wait for the reader to populate.
- */
+// A fetched chapter page has no page images; ts_reader fills them in at runtime.
+// The inject body must `return` — a promise here, so we can wait for the reader.
 const READER_SCRIPT = `
   return new Promise(function (resolve) {
     var deadline = Date.now() + 15000;
@@ -98,8 +89,7 @@ class ScytheScansExtension extends MangaStreamGeneric {
   contentRating: ContentRating = pbconfig.contentRating;
 
   override configureSections(): void {
-    // The theme's defaults miss here: this site lays every rail out as `bsx`
-    // cards inside a `listupd`, and shows four rails rather than two.
+    // This site lays every rail out as `bsx` cards in a `listupd`, and shows four.
     this.featuredSection.selectorFunc = ($: CheerioAPI) =>
       $("div.bsx", $("h2:contains(Popular Today)").closest("div.bixbox"));
 
@@ -118,7 +108,6 @@ class ScytheScansExtension extends MangaStreamGeneric {
     ];
   }
 
-  /** A simple carousel backed by the `bsx` cards under a named heading. */
   private railFor(id: string, heading: string): MangaStreamDiscoverSection {
     return {
       id,
@@ -134,11 +123,7 @@ class ScytheScansExtension extends MangaStreamGeneric {
     };
   }
 
-  /**
-   * "Popular Series" is not a `bsx` grid like the other rails - it is the
-   * theme's ranking widget, whose list items carry their title as text rather
-   * than in a link attribute.
-   */
+  // Not a `bsx` grid but the ranking widget: titles are text, not link attributes.
   private popularSeriesRail(): MangaStreamDiscoverSection {
     return {
       id: "popular_series",
@@ -154,15 +139,8 @@ class ScytheScansExtension extends MangaStreamGeneric {
     };
   }
 
-  /**
-   * The base resolves a rail through a hardcoded switch that only knows
-   * "popular" and "latest_updates" - every other id silently falls through to
-   * latest updates, so extra rails would all render the same rows. Resolve the
-   * section by its own id instead.
-   *
-   * Only the latest rail paginates: the home page continues at `/page/N/`,
-   * while the popular and recommendation widgets are single payloads.
-   */
+  // The base resolves rails through a switch that only knows "popular" and
+  // "latest_updates"; every other id silently falls through to latest updates.
   override async getDiscoverSectionItems(
     section: DiscoverSection,
     metadata: MangaStreamSearchMetadata | undefined,
@@ -195,9 +173,8 @@ class ScytheScansExtension extends MangaStreamGeneric {
     const $ = cheerio.load(Application.arrayBufferToUTF8String(buffer));
     const manga = this.parser.parseMangaDetails($, mangaId, this);
 
-    // The theme prints metadata rows as `<div class="imptdt">Label <i>Value</i></div>`
-    // - the label is the row's own text, the value sits in the child element.
-    // There is no colon to split on.
+    // Rows read `<div class="imptdt">Label <i>Value</i></div>`: the label is the
+    // row's own text, the value the child. There is no colon to split on.
     const rows = new Map<string, string>();
     $("div.tsinfo div.imptdt").each((_, element) => {
       const row = $(element);
@@ -241,12 +218,7 @@ class ScytheScansExtension extends MangaStreamGeneric {
     return manga;
   }
 
-  /**
-   * Title search paginates by path (`/page/2/?s=`); the `?page=` parameter the
-   * theme normally uses is ignored here. Filtered browsing does not paginate at
-   * all - every page of `/manga/` returns the same rows - so it reports a
-   * single page rather than looping forever.
-   */
+  // Title search paginates by path (`/page/2/?s=`); the theme's `?page=` is ignored.
   override async getSearchResults(
     query: SearchQuery<MangaStreamFilters>,
     metadata: MangaStreamSearchMetadata | undefined,
@@ -255,10 +227,6 @@ class ScytheScansExtension extends MangaStreamGeneric {
     const title = (query.title ?? "").trim();
 
     if (!title) {
-      // Browsing and filtering are the listing the base class already knows how
-      // to walk; it was being asked for the first page every time and its answer
-      // about further pages thrown away, so a reader could never get past page
-      // one of anything but a title search.
       return super.getSearchResults(query, metadata);
     }
 
@@ -301,7 +269,6 @@ class ScytheScansExtension extends MangaStreamGeneric {
 
     const { pages, diagnostics } = parseReport(result);
     if (pages.length === 0) {
-      // Surface what the webview saw; without it a failure here is opaque.
       throw new Error(`Unable to read any pages for chapter ${chapter.chapterId} [${diagnostics}]`);
     }
 
@@ -312,7 +279,6 @@ class ScytheScansExtension extends MangaStreamGeneric {
     };
   }
 
-  /** The chapter list carries the absolute URL for each entry. */
   private async resolveChapterUrl(chapter: Chapter): Promise<string> {
     const [, buffer] = await Application.scheduleRequest({
       url: `${this.domain}/${this.directoryPath}/${chapter.sourceManga.mangaId}/`,
@@ -333,21 +299,14 @@ class ScytheScansExtension extends MangaStreamGeneric {
   }
 }
 
-/**
- * The theme prints an explicit link to the following page. Advancing without
- * checking asks for a page that does not exist, which the site answers with a
- * 404 rather than an empty list.
- */
+// Asking for a page past the last one 404s instead of returning an empty list.
 function linksToPage($: CheerioAPI, page: number): boolean {
   return $("a[href]")
     .toArray()
     .some((element) => ($(element).attr("href") ?? "").includes(`/page/${page}/`));
 }
 
-/**
- * The webview replies with a JSON report. Older shapes returned a bare array,
- * so tolerate that too.
- */
+// The webview replies with a JSON report; older builds sent a bare array.
 function parseReport(result: unknown): { pages: string[]; diagnostics: string } {
   let raw: unknown = result;
 

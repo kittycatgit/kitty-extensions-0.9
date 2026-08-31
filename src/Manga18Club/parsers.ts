@@ -11,14 +11,13 @@ import {
 } from "@paperback/types";
 import type { CheerioAPI } from "cheerio";
 
-/** `/manhwa/<slug>` and `/manhwa/<slug>/<chapter>` both reduce to their slug. */
 export function slugFromUrl(url: string | undefined): string | undefined {
   const parts = (url ?? "").split("?")[0]?.replace(/\/+$/, "").split("/");
   const index = parts?.indexOf("manhwa") ?? -1;
   return index >= 0 ? parts?.[index + 1] : undefined;
 }
 
-/** Rows shared by the search results, genre listings and the home page. */
+// Search results, genre listings and the home page all use these same rows.
 export function parseSearchResults($: CheerioAPI): SearchResultItem[] {
   const items: SearchResultItem[] = [];
   const seen = new Set<string>();
@@ -46,13 +45,8 @@ export function parseSearchResults($: CheerioAPI): SearchResultItem[] {
   return items;
 }
 
-/**
- * True when the listing exposes a page after the one currently loaded.
- *
- * Only pagination links are considered. Series rows link to numbered chapters
- * (`/manhwa/<slug>/96`), which would otherwise read as page numbers and leave
- * pagination running forever.
- */
+// Pagination links only. Series rows link to /manhwa/<slug>/96, and that trailing
+// number reads as a page number, which paginates forever.
 export function hasNextPage($: CheerioAPI, currentPage: number): boolean {
   return $("a[href*='/list-manga'], a[href*='/manga-list']")
     .toArray()
@@ -113,7 +107,7 @@ export function parseMangaDetails($: CheerioAPI, mangaId: string, domain: string
   };
 }
 
-/** The detail page ships the full chapter list, newest first. */
+// The detail page carries the whole chapter list, newest first.
 export function parseChapters($: CheerioAPI, sourceManga: SourceManga): Chapter[] {
   const chapters: Chapter[] = [];
   const seen = new Set<string>();
@@ -124,7 +118,7 @@ export function parseChapters($: CheerioAPI, sourceManga: SourceManga): Chapter[
     if (!href || !chapterId || seen.has(chapterId) || !/chapter-/i.test(chapterId)) {
       continue;
     }
-    // Skip links that belong to a different title, such as "related" rails.
+    // "Related" rails link to chapters of other titles.
     if (slugFromUrl(href) !== sourceManga.mangaId) {
       continue;
     }
@@ -148,9 +142,8 @@ export function parseChapters($: CheerioAPI, sourceManga: SourceManga): Chapter[
 export function parseChapterPages($: CheerioAPI, html: string): string[] {
   const pages: string[] = [];
 
-  // The reader's image URLs are base64 encoded inside an inline script and
-  // decoded client side, so they never appear as plain text or as <img> tags
-  // in the response. Decode them in document order, which is reading order.
+  // Page URLs are base64 inside an inline script, so they appear neither as text nor as
+  // <img> tags. Document order is reading order.
   for (const candidate of html.match(/[A-Za-z0-9+/]{60,}={0,2}/g) ?? []) {
     const decoded = Application.base64Decode(candidate);
     if (typeof decoded !== "string") {
@@ -167,7 +160,7 @@ export function parseChapterPages($: CheerioAPI, html: string): string[] {
     return pages;
   }
 
-  // Fallback for any chapter served with the images already in the markup.
+  // Some chapters are still served with the images in the markup.
   for (const element of $("div#chapter_boxImages img, img.image-chapter").toArray()) {
     const source = ($(element).attr("src") ?? $(element).attr("data-src") ?? "").trim();
     if (source && !pages.includes(source)) {

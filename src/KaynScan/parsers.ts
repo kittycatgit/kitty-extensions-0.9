@@ -3,22 +3,12 @@
 
 import type { KaynChapter } from "./models";
 
-/**
- * The chapters a series page carries.
- *
- * The page is rendered on the server and its chapter list never reaches the
- * markup - only one link does. The data is streamed instead inside the
- * framework's own payload, as JSON with its quotes escaped, which is why it has
- * to be unescaped before it can be read. Reading that is less fragile than it
- * sounds: the objects are complete and self-describing, and a shape change
- * shows up as no chapters rather than as wrong ones.
- */
+// The chapter list never reaches the markup: it is streamed inside the framework
+// payload as JSON with escaped quotes, hence the `\\"` in every pattern below.
 export function parseChapters(html: string): KaynChapter[] {
   const rows: KaynChapter[] = [];
   const seen = new Set<string>();
 
-  // Each chapter is one object; its fields are read from the object rather than
-  // in a fixed order, so a field moving or a new one appearing changes nothing.
   for (const match of html.matchAll(/\\"number\\":(-?[\d.]+)([^{}]{0,600})/g)) {
     const number = match[1] ?? "";
     const body = match[2] ?? "";
@@ -44,13 +34,6 @@ export function parseChapters(html: string): KaynChapter[] {
   return rows;
 }
 
-/**
- * The series' own description, as the page states it for search engines.
- *
- * Taken from the page's structured data rather than its markup: it is the same
- * information the site shows, in a form that does not move when the layout
- * does.
- */
 export function parseBook(html: string): {
   title?: string;
   description?: string;
@@ -84,28 +67,19 @@ export function parseBook(html: string): {
         rating: rating?.ratingValue === undefined ? undefined : Number(rating.ratingValue),
       };
     } catch {
-      // A block that will not parse is not the one we want.
+      // Not JSON, so not the block we are after.
     }
   }
 
   return { genres: [] };
 }
 
-/**
- * Every page image of a chapter, in the order the site numbers them.
- *
- * Two different naming schemes are in use: older chapters are `p0001.webp`,
- * which happens to sort correctly, while revised ones are `p-<uuid>.webp`,
- * which carries no order at all. Neither the filename nor the order the images
- * appear in the markup can be trusted, so the number the site states for each
- * page is used - it is present for both schemes and is what the site itself
- * reads.
- */
+// Filenames come in two schemes (`p0001.webp` and `p-<uuid>.webp`) and neither the
+// name nor the order in the payload is reliable, so sort on the stated pageNumber.
 export function parsePages(html: string): string[] {
   const pages: { number: number; url: string }[] = [];
   const seen = new Set<number>();
 
-  // The page objects carry the number first and the address a little after it.
   const pattern = /\\"pageNumber\\":(\d+)[^{}]{0,200}?\\"imageUrl\\":\\"([^\\"]+)\\"/g;
 
   for (const match of html.matchAll(pattern)) {

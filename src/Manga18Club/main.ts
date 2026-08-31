@@ -44,8 +44,6 @@ import pbconfig from "./pbconfig";
 const DOMAIN = "https://manga18.club";
 
 class Manga18ClubExtension implements ExtensionImpl<typeof pbconfig> {
-  // The site is fronted by Cloudflare and throttles bursts, so keep requests
-  // modest. Images come from a separate CDN and are exempt.
   private readonly cookieStorage = new CookieStorageInterceptor({ storage: "stateManager" });
 
   private readonly interceptor = new Manga18Interceptor("main", DOMAIN);
@@ -87,13 +85,8 @@ class Manga18ClubExtension implements ExtensionImpl<typeof pbconfig> {
     return SORTING_OPTIONS;
   }
 
-  /**
-   * The genres the site browses by, read from its nav menu and cached.
-   *
-   * The list lives in the site's own markup rather than in this build, so it
-   * is parsed at runtime; the bundled list is only a fallback for when that
-   * request fails, so the filter is never left empty.
-   */
+  // The nav menu is the live genre list; the bundled GENRES is only the fallback
+  // for when that request fails.
   private async genreTags(): Promise<Tag[]> {
     const cached = Application.getState(GENRE_STATE_KEY) as
       | { at?: number; genres?: Tag[] }
@@ -114,7 +107,7 @@ class Manga18ClubExtension implements ExtensionImpl<typeof pbconfig> {
 
       for (const element of $(GENRE_MENU_SELECTOR).toArray()) {
         const href = $(element).attr("href") ?? "";
-        // Slugs keep the site's own casing, since its paths are case sensitive.
+        // Keep the site's casing: its paths are case sensitive.
         const slug = href.split("/manga-list/")[1]?.replace(/\/$/, "").trim();
         const title = $(element).text().replace(/\s+/g, " ").trim();
 
@@ -171,9 +164,7 @@ class Manga18ClubExtension implements ExtensionImpl<typeof pbconfig> {
     const items = parseSearchResults($);
     const more = items.length > 0 && hasNextPage($, page);
 
-    // Build the continuation metadata without any `undefined` values: it is
-    // serialised as JSON across the bridge, and an explicit undefined member
-    // is not a valid JSON value.
+    // Metadata crosses the bridge as JSON, so never set a key to undefined.
     const next: Manga18SearchMetadata = more ? { page: page + 1 } : { completed: true };
     if (more && genre) {
       next.genre = genre;

@@ -79,13 +79,8 @@ class TCBScansExtension implements ExtensionImpl<typeof pbconfigType> {
     return { id: chapter.chapterId, mangaId: chapter.sourceManga.mangaId, pages };
   }
 
-  /**
-   * Every series the group scanlates, in one request.
-   *
-   * There are a few dozen of them and the site lists them all on one page, so
-   * this is fetched once and paged through here rather than asking the site for
-   * a slice at a time - it has no way to serve one.
-   */
+  // The site lists every series on one page and cannot serve a slice, so paging
+  // happens here.
   private async allSeries(): Promise<ReturnType<typeof parseSeriesList>> {
     const $ = await this.fetch(PROJECTS_PATH);
     return parseSeriesList($);
@@ -104,9 +99,7 @@ class TCBScansExtension implements ExtensionImpl<typeof pbconfigType> {
     const page = paging?.page ?? 0;
     const wanted = (query.title ?? "").trim().toLowerCase();
 
-    // The site has no search of its own - no endpoint, no form - so the list of
-    // series is matched here. With a few dozen titles that is a single request,
-    // and it means a search still works rather than being left out.
+    // The site has no search endpoint, so the full series list is filtered here.
     const all = await this.allSeries();
     const matching = wanted
       ? all.filter((series) => series.title.toLowerCase().includes(wanted))
@@ -150,10 +143,8 @@ class TCBScansExtension implements ExtensionImpl<typeof pbconfigType> {
       const $ = await this.fetch("/");
       const releases = parseLatestReleases($);
 
-      // A release names its own series but not which series page it belongs to,
-      // and the front page does not link one to the other. Matching on the name
-      // against the list of series is what ties the two together, so tapping a
-      // release opens the series it came from.
+      // The front page never links a release to its series page, so the only way
+      // back is matching on the title.
       const all = await this.allSeries();
       const byTitle = new Map(all.map((series) => [series.title.toLowerCase(), series.mangaId]));
 
@@ -161,8 +152,6 @@ class TCBScansExtension implements ExtensionImpl<typeof pbconfigType> {
         items: releases.flatMap((release) => {
           const mangaId = byTitle.get(release.title.toLowerCase());
 
-          // Without a series to open, a card goes nowhere - leave it out rather
-          // than hand back one that cannot be tapped.
           if (!mangaId) {
             return [];
           }

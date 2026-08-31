@@ -7,27 +7,18 @@ import type { Element } from "domhandler";
 
 import { DOMAIN, FALLBACK_COVER, chapterIdFromHref, seriesIdFromHref, seriesUrl } from "./models";
 
-/** A series as the listing pages present it: a link wrapped around its cover. */
 export type SeriesCard = {
   mangaId: string;
   title: string;
   imageUrl: string;
 };
 
-/** A release as the front page presents it. */
 export type ReleaseCard = SeriesCard & {
   chapterId: string;
-  /** The series a release belongs to is only knowable from its own page, so a
-   * release stands in for its series by its chapter until then. */
   subtitle?: string;
 };
 
-/**
- * An image address off an element that may not have loaded yet.
- *
- * Reading `src` alone works until a page lazy-loads its artwork, at which point
- * `src` holds a placeholder and the real address sits in a data attribute.
- */
+// Lazy-loaded artwork leaves a placeholder in src and the real address in a data attribute.
 function imageFrom(element: Cheerio<Element>): string | undefined {
   const candidates = [
     element.attr("data-src"),
@@ -61,7 +52,6 @@ function absolute(src: string | undefined): string {
   return value.startsWith("/") ? `${DOMAIN}${value}` : `${DOMAIN}/${value}`;
 }
 
-/** The first candidate that resolves to an address with a scheme and a host. */
 function cover(...candidates: (string | undefined)[]): string {
   for (const candidate of candidates) {
     const resolved = absolute(candidate);
@@ -74,12 +64,7 @@ function cover(...candidates: (string | undefined)[]): string {
   return FALLBACK_COVER;
 }
 
-/**
- * Every series the group lists.
- *
- * A card is a link around a single image, and the title is the image's own
- * alternative text - there is no separate label to read.
- */
+// Cards carry no text label, so the title is the cover image's alt text.
 export function parseSeriesList($: CheerioAPI): SeriesCard[] {
   const seen = new Set<string>();
   const items: SeriesCard[] = [];
@@ -106,13 +91,7 @@ export function parseSeriesList($: CheerioAPI): SeriesCard[] {
   return items;
 }
 
-/**
- * What the front page has just posted.
- *
- * Each release names its series in its own alternative text - "One Piece
- * Chapter 1191" - so the series name is what is left once the chapter is taken
- * off the end, and the chapter is what was taken off.
- */
+// Alt text reads "One Piece Chapter 1191": the series name, then the chapter.
 export function parseLatestReleases($: CheerioAPI): ReleaseCard[] {
   const seen = new Set<string>();
   const items: ReleaseCard[] = [];
@@ -142,6 +121,7 @@ export function parseLatestReleases($: CheerioAPI): ReleaseCard[] {
 
     seen.add(chapterId);
     items.push({
+      // Only the release's own page names its series, so mangaId stays empty.
       mangaId: "",
       chapterId,
       title,
@@ -153,16 +133,13 @@ export function parseLatestReleases($: CheerioAPI): ReleaseCard[] {
   return items;
 }
 
-/** A series' own page: its name, artwork and blurb. */
 export function parseSeriesDetails($: CheerioAPI, mangaId: string): SourceManga {
   const primaryTitle = $("h1").first().text().trim() || mangaId;
 
-  // The cover is the one piece of artwork the page carries that is not a site
-  // fixture, so it is the first image served off the content host.
+  // The only artwork served off the CDN is the cover; everything else is a site fixture.
   const seriesImage = $('img[src*="cdn."]').first();
 
-  // The blurb is the longest run of prose on the page; the shorter paragraphs
-  // are notices and links.
+  // The blurb is the longest paragraph on the page; the short ones are notices and links.
   let synopsis = "";
   $("p").each((_, element) => {
     const text = $(element).text().trim();
@@ -185,13 +162,7 @@ export function parseSeriesDetails($: CheerioAPI, mangaId: string): SourceManga 
   };
 }
 
-/**
- * A series' chapters.
- *
- * Each entry carries its own heading - "Chainsaw Man Chapter 179" - and, below
- * it, whatever the group titled that chapter. The number is taken from the
- * heading; the group's title is kept as the chapter's name when there is one.
- */
+// First div is the heading, "Chainsaw Man Chapter 179"; the second is the group's own title.
 export function parseChapterList($: CheerioAPI, sourceManga: SourceManga): Chapter[] {
   const seen = new Set<string>();
   const chapters: Chapter[] = [];
@@ -204,8 +175,7 @@ export function parseChapterList($: CheerioAPI, sourceManga: SourceManga): Chapt
       return;
     }
 
-    // A release card is a link around an image; a chapter row is a link around
-    // text. Only the rows belong to a chapter list.
+    // Release cards are links around an image; chapter rows are links around text.
     if (anchor.find("img").length > 0) {
       return;
     }
@@ -227,12 +197,6 @@ export function parseChapterList($: CheerioAPI, sourceManga: SourceManga): Chapt
   return chapters;
 }
 
-/**
- * A chapter's pages.
- *
- * They are plain images on the content host, in reading order, with nothing
- * signed or hidden about them.
- */
 export function parsePages($: CheerioAPI): string[] {
   const pages: string[] = [];
 

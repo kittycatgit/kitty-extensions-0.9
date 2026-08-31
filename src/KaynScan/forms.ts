@@ -11,14 +11,7 @@ import {
 
 import { STATUSES, TYPES, type KaynGenre, type KaynSearchMetadata } from "./models";
 
-/**
- * The site's own filters, offered as it publishes them.
- *
- * Each of these was checked against the live API and genuinely narrows the
- * results; the ones the endpoint quietly ignores are not offered. Genres are
- * the site's own list rather than one written down here, so a genre added
- * tomorrow appears without this extension being touched.
- */
+// Only filters the API actually honours; it ignores the rest without saying so.
 export class KaynSearchForm extends AdvancedSearchForm {
   private readonly genres: KaynGenre[];
 

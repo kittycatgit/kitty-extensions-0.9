@@ -31,7 +31,6 @@ import pbconfig from "./pbconfig";
 
 const DOMAIN = "https://danke.moe";
 
-/** The full index is a single large document, so hold it briefly per session. */
 const INDEX_TTL_MS = 5 * 60 * 1000;
 
 type IndexEntry = GuyaSeriesSummary & { displayTitle: string };
@@ -52,10 +51,7 @@ class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
     return JSON.parse(Application.arrayBufferToUTF8String(buffer)) as T;
   }
 
-  /**
-   * Section membership is only expressed in each section's page, so pull the
-   * series slugs out of its markup. Cached for the same window as the index.
-   */
+  // No API exposes section membership; the slugs only exist in the page markup.
   private async getCategorySlugs(categoryId: string): Promise<string[]> {
     const cached = this.categories.get(categoryId);
     if (cached && Date.now() - cached.at < INDEX_TTL_MS) {
@@ -85,7 +81,7 @@ class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
     return slugs;
   }
 
-  /** `/api/get_all_series/` is the only listing endpoint, so cache it. */
+  // get_all_series is the only listing endpoint, and it returns everything.
   private async getIndex(): Promise<IndexEntry[]> {
     const cached = this.index;
     if (cached && Date.now() - cached.at < INDEX_TTL_MS) {
@@ -103,8 +99,7 @@ class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
   }
 
   private toSearchResult(entry: IndexEntry): SearchResultItem {
-    // The index carries no chapter counts, so surface the update date instead
-    // of spending a request per row to fetch them.
+    // The index has no chapter counts, so show the update date instead.
     const subtitle = formatUpdated(entry.last_updated);
 
     return {
@@ -177,7 +172,6 @@ class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
       });
     }
 
-    // The API returns chapters keyed by number; present newest first.
     return chapters.sort((a, b) => b.chapNum - a.chapNum);
   }
 
@@ -216,8 +210,7 @@ class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
     const category =
       paging?.category ?? (query.metadata as DankeSearchMetadata | undefined)?.category;
 
-    // The site's search box filters its rendered list rather than calling an
-    // endpoint, so do the same over the cached index.
+    // There is no search endpoint; the site filters its own rendered list.
     let matches = (await this.getIndex()).filter(
       (entry) =>
         !title ||
@@ -305,7 +298,6 @@ class DankeFursLesenExtension implements ExtensionImpl<typeof pbconfig> {
   }
 }
 
-/** Epoch seconds to a short, readable update date. */
 function formatUpdated(epochSeconds: number): string {
   if (!epochSeconds) {
     return "";
@@ -319,7 +311,7 @@ function formatUpdated(epochSeconds: number): string {
   return `Updated ${date.toISOString().slice(0, 10)}`;
 }
 
-/** Descriptions are authored as HTML, which the app renders as plain text. */
+// Descriptions come back as HTML, but the app renders synopses as plain text.
 function stripHtml(value: string): string {
   return Application.decodeHTMLEntities(
     (value ?? "")

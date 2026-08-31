@@ -1,17 +1,11 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright © 2026 kittycatgit */
 
-/**
- * Client for the site's tRPC API.
- *
- * The site is a client-rendered single page app: its HTML carries no content,
- * so everything here is read from the same JSON API the page itself calls.
- */
+// The site is a client-rendered SPA - its HTML carries no content, so
+// everything is read from the tRPC API the page itself calls.
 
-/** Marker for a reply the API refused because the reader token was rejected. */
 export class ReaderForbiddenError extends Error {}
 
-/** Marker for a reply the API refused because no session cookie was sent. */
 export class UnauthorisedError extends Error {}
 
 type TrpcEnvelope = {
@@ -19,13 +13,8 @@ type TrpcEnvelope = {
   error?: { json?: { message?: string; data?: { httpStatus?: number } } };
 };
 
-/**
- * Drops keys whose value is undefined.
- *
- * The API validates its input with a schema that rejects an explicit `null`
- * for an optional field, so an unset filter has to be absent from the object
- * rather than present and empty.
- */
+// The input schema rejects an explicit null for an optional field, so an unset
+// filter has to be absent rather than present and empty.
 export function compact<T extends Record<string, unknown>>(input: T): Partial<T> {
   const output: Record<string, unknown> = {};
 
@@ -41,7 +30,6 @@ export function compact<T extends Record<string, unknown>>(input: T): Partial<T>
 export class HiperDexApi {
   private readonly domain: string;
 
-  /** Set once a session cookie has been picked up, to avoid re-priming. */
   private primed = false;
 
   constructor(domain: string) {
@@ -49,32 +37,21 @@ export class HiperDexApi {
   }
 
   private url(procedure: string, input: unknown): string {
-    // tRPC reads a batch of one, keyed by position, with the payload wrapped
-    // in `json` for its transformer.
+    // A batch of one, keyed by position, with the input wrapped in `json` for
+    // tRPC's transformer.
     const payload = encodeURIComponent(JSON.stringify({ 0: { json: input ?? null } }));
     return `${this.domain}/api/trpc/${procedure}?batch=1&input=${payload}`;
   }
 
-  /**
-   * Fetches the site root purely for its `Set-Cookie`.
-   *
-   * Every procedure answers 401 without the anonymous session cookie the root
-   * document issues, so a cold extension has to collect it before its first
-   * call. The cookie interceptor stores whatever comes back.
-   */
+  // Every procedure answers 401 without the anonymous session cookie the root
+  // document issues. This fetch is only for its `Set-Cookie`.
   async primeSession(): Promise<void> {
     await Application.scheduleRequest({ url: `${this.domain}/`, method: "GET" });
     this.primed = true;
   }
 
-  /**
-   * Calls one procedure once for each input, in a single request.
-   *
-   * tRPC takes a batch keyed by position and answers with a reply per entry, so
-   * asking about thirty series costs one round trip rather than thirty. A
-   * failed entry comes back as undefined rather than sinking the rest - this is
-   * used to decorate results, and a decoration is never worth losing them over.
-   */
+  // A failed entry comes back undefined rather than sinking the rest, since
+  // this only ever decorates results.
   async queryEach<T>(procedure: string, inputs: unknown[]): Promise<(T | undefined)[]> {
     if (inputs.length === 0) {
       return [];
@@ -85,6 +62,7 @@ export class HiperDexApi {
       payload[index] = { json: input ?? null };
     });
 
+    // A batch repeats the procedure name once per input.
     const url = `${this.domain}/api/trpc/${inputs.map(() => procedure).join(",")}?batch=1&input=${encodeURIComponent(JSON.stringify(payload))}`;
 
     try {
@@ -105,10 +83,6 @@ export class HiperDexApi {
     }
   }
 
-  /**
-   * Calls a procedure, priming the session once if the API reports the request
-   * as unauthenticated.
-   */
   async query<T>(procedure: string, input: unknown, headers?: Record<string, string>): Promise<T> {
     try {
       return await this.request<T>(procedure, input, headers);

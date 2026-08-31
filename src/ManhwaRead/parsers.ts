@@ -14,7 +14,7 @@ import type { Element } from "domhandler";
 
 import { STATUS_LABELS } from "./models";
 
-/** Series live at `/manhwa/<slug>/`; the slug alone is the id. */
+// Series live at /manhwa/<slug>/ and the slug alone is the id.
 export function slugFromHref(href: string | undefined): string | undefined {
   const path = (href ?? "").split(/[?#]/)[0]?.replace(/\/+$/, "");
   const parts = path?.split("/").filter(Boolean) ?? [];
@@ -22,21 +22,13 @@ export function slugFromHref(href: string | undefined): string | undefined {
   return index >= 0 ? parts[index + 1] : parts[parts.length - 1];
 }
 
-/** A chapter link's trailing segment identifies the chapter. */
 export function chapterIdFromHref(href: string | undefined): string | undefined {
   const path = (href ?? "").split(/[?#]/)[0]?.replace(/\/+$/, "");
   return path?.split("/").filter(Boolean).pop();
 }
 
-/**
- * Picks an image address off an element that may not have loaded yet.
- *
- * The site lazy-loads its artwork: the real address sits in one of the data
- * attributes and `src` holds a placeholder, or nothing at all, until the
- * browser gets to it. Reading `src` alone therefore works on some pages and
- * quietly returns a blank on others - which is how a series could show its
- * cover in a listing and then have none on its own page.
- */
+// Artwork is lazy-loaded: the real address is in a data attribute and src holds
+// a placeholder, or nothing, until the browser gets to it.
 function imageFrom(element: Cheerio<Element>): string | undefined {
   const candidates = [
     element.attr("data-src"),
@@ -44,7 +36,7 @@ function imageFrom(element: Cheerio<Element>): string | undefined {
     element.attr("data-cfsrc"),
     element.attr("data-original"),
     element.attr("src"),
-    // Last, and only as a rescue: its first entry is a scaled-down variant.
+    // Last resort: the first srcset entry is a scaled-down variant.
     element.attr("srcset")?.split(",")[0]?.trim().split(" ")[0],
   ];
 
@@ -60,17 +52,8 @@ function imageFrom(element: Cheerio<Element>): string | undefined {
   return undefined;
 }
 
-/**
- * The first candidate that resolves to an address worth handing over.
- *
- * A series page can carry an og:image that is simply broken - `https:/` with
- * one slash and no host at all, on this site - and a value that starts with
- * `http` was being taken at its word, so the app was handed something it could
- * not fetch and the series showed no cover while its own thumbnail was fine.
- * Each candidate is resolved and checked for a scheme and a host before it is
- * accepted, and a series with nothing usable ends at a real address that holds
- * no image rather than an empty one, which is rejected outright.
- */
+// Some pages carry a broken og:image ("https:/" with no host), so check every
+// candidate for a scheme and a host. An empty imageUrl fails the whole row.
 function firstUsableImage(domain: string, candidates: (string | undefined)[]): string {
   for (const candidate of candidates) {
     const value = candidate?.trim();
@@ -97,7 +80,7 @@ function absolute(domain: string, src: string | undefined): string {
   return value.startsWith("/") ? `${domain}${value}` : `${domain}/${value}`;
 }
 
-/** Rows shared by every home rail and the search listing. */
+// Every home rail and the search listing share these rows.
 export function parseListing($: CheerioAPI, domain: string): SearchResultItem[] {
   const items: SearchResultItem[] = [];
   const seen = new Set<string>();
@@ -113,8 +96,6 @@ export function parseListing($: CheerioAPI, domain: string): SearchResultItem[] 
     const image = $("img", element).first();
     const title = link.attr("title")?.trim() || link.text().trim();
 
-    // The card lists its newest chapter; show it rather than leaving the row bare.
-    // Cards list their newest chapters; the text carries a relative date too.
     const subtitle = $("a.chapter-item", element).first().text().replace(/\s+/g, " ").trim();
 
     items.push({
@@ -128,7 +109,7 @@ export function parseListing($: CheerioAPI, domain: string): SearchResultItem[] 
   return items;
 }
 
-/** The paginator only renders a forward link while further pages exist. */
+// The paginator only renders a forward link while further pages exist.
 export function hasNextPage($: CheerioAPI): boolean {
   return (
     $(".wp-pagenavi a.last, .wp-pagenavi a.nextpostslink, a.next.page-numbers, a.next").length > 0
@@ -163,7 +144,7 @@ export function parseMangaDetails($: CheerioAPI, mangaId: string, domain: string
     return [...seen];
   };
 
-  /** Metadata is printed as a label followed by a sibling list of links. */
+  // Metadata is printed as a label followed by a sibling list of links.
   const labelled = (label: string): string[] =>
     textsOf(`#mangaSummary .text-primary:contains(${label}) + .flex a span:first-child`);
 
@@ -214,9 +195,6 @@ export function parseMangaDetails($: CheerioAPI, mangaId: string, domain: string
     mangaInfo: {
       primaryTitle,
       secondaryTitles,
-      // A cover that comes back empty is rejected outright, so this ends at a
-      // real address that simply holds no image and lets the app draw its own
-      // placeholder, rather than handing back nothing.
       thumbnailUrl: firstUsableImage(domain, [
         imageFrom($("#mangaSummary img").first()),
         $("meta[property='og:image']").attr("content"),
@@ -235,7 +213,7 @@ export function parseMangaDetails($: CheerioAPI, mangaId: string, domain: string
   };
 }
 
-/** Dates are printed as dd/MM/yyyy. */
+// Dates are printed dd/MM/yyyy, day first.
 function parseDate(text: string): Date | undefined {
   const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text.trim());
   if (!match?.[1] || !match[2] || !match[3]) {
@@ -275,11 +253,8 @@ export function parseChapters($: CheerioAPI, sourceManga: SourceManga): Chapter[
   return chapters.sort((a, b) => b.chapNum - a.chapNum);
 }
 
-/**
- * Page URLs are not in the markup. The chapter page carries a `chapterData`
- * object whose `data` field is a base64 encoded JSON array of file names, to be
- * joined onto its `base` prefix.
- */
+// Page URLs are not in the markup. A `chapterData` script var holds a base64
+// JSON array of file names to join onto its `base` prefix.
 export function parseChapterPages(html: string): string[] {
   const match = /var\s+chapterData\s*=\s*(\{[\s\S]*?\})\s*[;\n]/.exec(html);
   if (!match?.[1]) {
