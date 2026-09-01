@@ -4,6 +4,7 @@ Paperback 0.9 extensions.
 
 ## Sources
 
+- [CoffeeManga](https://coffeemanga.net)
 - [DankeFursLesen](https://danke.moe)
 - [HiperDex](https://hiperdex.tv)
 - [Kavita](https://www.kavitareader.com) — your own server
