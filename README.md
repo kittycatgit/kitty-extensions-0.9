@@ -15,6 +15,7 @@ Paperback 0.9 extensions.
 - [ManhwaToon](https://www.manhwatoon.me)
 - [OniSaga](https://onisaga.com)
 - [ScytheScans](https://scythescans.com)
+- [SilentQuill](https://www.silentquill.net)
 - [TCB Scans](https://tcbonepiecechapters.com)
 - [ToonTop](https://toontop.io)
 - [ZinManga](https://www.zinmanga.net)
