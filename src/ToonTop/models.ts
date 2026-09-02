@@ -54,9 +54,15 @@ export type ToonTopChapter = {
   slug: string;
   url: string;
   number?: number;
+  // The page props spell this `updatedAt`; the chapter feed spells it `updated_at`.
   updatedAt?: string;
+  updated_at?: string;
   group?: string | null;
   views?: number;
+};
+
+export type ToonTopChapterFeed = {
+  data?: { chapters?: ToonTopChapter[] };
 };
 
 export type ToonTopPagination = {

@@ -28,6 +28,8 @@ import {
   HOME_SECTIONS,
   RANKED_SECTIONS,
   SORTING_OPTIONS,
+  type ToonTopChapter,
+  type ToonTopChapterFeed,
   type ToonTopItem,
   type ToonTopPagination,
   type ToonTopRef,
@@ -38,6 +40,10 @@ import { ToonTopInterceptor } from "./network";
 import type pbconfigType from "./pbconfig";
 
 const DOMAIN = "https://toontop.io";
+
+// The series page embeds only the newest 50 chapters; the site's own reader
+// reads the whole list from here.
+const API_DOMAIN = "https://api.toontop.io";
 
 class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
   private readonly cookieStorage = new CookieStorageInterceptor({ storage: "stateManager" });
@@ -203,18 +209,23 @@ class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
   }
 
   async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
-    const props = await this.getPageProps<{ initialManga: ToonTopItem }>(
+    const props = await this.getPageProps<{ initialManga: ToonTopItem; mangaHsid?: string }>(
       `${sourceManga.mangaId}.json`,
     );
 
+    const rows = props.mangaHsid
+      ? await this.getChapterFeed(props.mangaHsid)
+      : (props.initialManga.chapters ?? []);
+
     const chapters: Chapter[] = [];
-    for (const entry of props.initialManga.chapters ?? []) {
+    for (const entry of rows) {
       const chapterId = entry.slug || entry.url.split("/").filter(Boolean).pop();
       if (!chapterId) {
         continue;
       }
 
-      const published = entry.updatedAt ? new Date(entry.updatedAt) : undefined;
+      const updated = entry.updatedAt ?? entry.updated_at;
+      const published = updated ? new Date(updated) : undefined;
       chapters.push({
         chapterId,
         sourceManga,
@@ -227,6 +238,18 @@ class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
     }
 
     return chapters.sort((a, b) => b.chapNum - a.chapNum);
+  }
+
+  private async getChapterFeed(hsid: string): Promise<ToonTopChapter[]> {
+    const body = await this.getText(`${API_DOMAIN}/titles/${hsid}/chapters`);
+    const rows = (JSON.parse(body) as ToonTopChapterFeed).data?.chapters ?? [];
+
+    // Better to fail than to quietly hand back the truncated page-props list.
+    if (rows.length === 0) {
+      throw new Error(`No chapters were returned for ${hsid}.`);
+    }
+
+    return rows;
   }
 
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
