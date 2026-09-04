@@ -10,6 +10,7 @@ Paperback 0.9 extensions.
 - [Kavita](https://www.kavitareader.com) — your own server
 - [Kayn Scan](https://kaynscans.com)
 - [Manga18Club](https://manga18.club)
+- [manga3asq](https://3asq.online) — Arabic
 - [MangaHub](https://mangahub.io)
 - [ManhwaRead](https://manhwaread.com)
 - [ManhwaToon](https://www.manhwatoon.me)
