@@ -1,5 +1,5 @@
 {
-  "buildTime": "2026-09-04T12:15:46.262Z",
+  "buildTime": "2026-09-04T12:36:07.605Z",
   "builtWith": {
     "toolchain": "1.0.0-alpha.92",
     "types": "1.0.0-alpha.92"
@@ -242,7 +242,7 @@
     {
       "name": "ScytheScans",
       "description": "Extension that pulls content from scythescans.com.",
-      "version": "1.0.0-alpha.12",
+      "version": "1.0.0-alpha.13",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "MATURE",
