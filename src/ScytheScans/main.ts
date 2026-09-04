@@ -26,63 +26,6 @@ import pbconfig from "./pbconfig";
 
 const DOMAIN_NAME: string = "https://scythescans.com";
 
-// A fetched chapter page has no page images; ts_reader fills them in at runtime.
-// The inject body must `return` — a promise here, so we can wait for the reader.
-const READER_SCRIPT = `
-  return new Promise(function (resolve) {
-    var deadline = Date.now() + 15000;
-
-    function report(images, sources) {
-      return JSON.stringify({
-        images: images,
-        readerPresent: !!window.ts_reader,
-        paramsPresent: !!(window.ts_reader && window.ts_reader.params),
-        sourceCount: sources ? sources.length : 0,
-        readerAreaImgs: document.querySelectorAll('#readerarea img').length,
-        scripts: document.querySelectorAll('script').length,
-        readyState: document.readyState,
-      });
-    }
-
-    function collect() {
-      try {
-        var reader = window.ts_reader;
-        var sources = reader && reader.params && reader.params.sources;
-        var images = [];
-
-        if (sources && sources.length) {
-          for (var i = 0; i < sources.length; i++) {
-            var list = sources[i].images || [];
-            for (var j = 0; j < list.length; j++) {
-              if (list[j] && images.indexOf(list[j]) === -1) images.push(list[j]);
-            }
-            if (images.length) break;
-          }
-        }
-
-        if (!images.length) {
-          // Fall back to whatever the reader has already rendered.
-          var rendered = document.querySelectorAll('#readerarea img');
-          for (var k = 0; k < rendered.length; k++) {
-            var src = rendered[k].getAttribute('src') || rendered[k].getAttribute('data-src');
-            if (src && src.indexOf('readerarea.svg') === -1 && images.indexOf(src) === -1) {
-              images.push(src);
-            }
-          }
-        }
-
-        if (images.length) return resolve(report(images, sources));
-        if (Date.now() > deadline) return resolve(report([], sources));
-        setTimeout(collect, 250);
-      } catch (error) {
-        resolve(JSON.stringify({ images: [], error: String(error) }));
-      }
-    }
-
-    collect();
-  });
-`;
-
 class ScytheScansExtension extends MangaStreamGeneric {
   domain = DOMAIN_NAME;
   name = pbconfig.name;
@@ -254,22 +197,10 @@ class ScytheScansExtension extends MangaStreamGeneric {
     const chapterUrl = await this.resolveChapterUrl(chapter);
 
     const [, buffer] = await Application.scheduleRequest({ url: chapterUrl, method: "GET" });
-    const html = Application.arrayBufferToUTF8String(buffer);
+    const pages = parsePages(Application.arrayBufferToUTF8String(buffer));
 
-    const { result } = await Application.executeInWebView({
-      source: {
-        html,
-        baseUrl: chapterUrl,
-        loadCSS: false,
-        loadImages: true,
-      },
-      inject: READER_SCRIPT,
-      storage: { cookies: this.cookieStorageInterceptor.cookies as never },
-    });
-
-    const { pages, diagnostics } = parseReport(result);
     if (pages.length === 0) {
-      throw new Error(`Unable to read any pages for chapter ${chapter.chapterId} [${diagnostics}]`);
+      throw new Error(`Unable to read any pages for chapter ${chapter.chapterId}`);
     }
 
     return {
@@ -306,48 +237,39 @@ function linksToPage($: CheerioAPI, page: number): boolean {
     .some((element) => ($(element).attr("href") ?? "").includes(`/page/${page}/`));
 }
 
-// The webview replies with a JSON report; older builds sent a bare array.
-function parseReport(result: unknown): { pages: string[]; diagnostics: string } {
-  let raw: unknown = result;
+// ts_reader is configured by a base64 `data:` script rather than plain markup,
+// so the page list is already in the html and no reader has to run for it.
+function parsePages(html: string): string[] {
+  const pages: string[] = [];
 
-  if (typeof raw === "string") {
-    const length = raw.length;
-    try {
-      raw = JSON.parse(raw);
-    } catch {
-      return { pages: [], diagnostics: `unparsable reply of ${length} chars` };
+  for (const blob of html.match(/data:text\/javascript;base64,[A-Za-z0-9+/=]+/g) ?? []) {
+    const decoded = Application.base64Decode(blob.split(",")[1] ?? "");
+
+    if (typeof decoded !== "string" || !decoded.includes("ts_reader.run")) {
+      continue;
+    }
+
+    const payload = /ts_reader\.run\((\{[\s\S]*?\})\);/.exec(decoded)?.[1];
+
+    if (!payload) {
+      continue;
+    }
+
+    for (const source of (JSON.parse(payload) as { sources?: { images?: string[] }[] }).sources ??
+      []) {
+      for (const url of source.images ?? []) {
+        if (url && !pages.includes(url)) {
+          pages.push(url);
+        }
+      }
+
+      if (pages.length > 0) {
+        return pages;
+      }
     }
   }
 
-  if (Array.isArray(raw)) {
-    return {
-      pages: raw.filter((page): page is string => typeof page === "string"),
-      diagnostics: "",
-    };
-  }
-
-  if (!raw || typeof raw !== "object") {
-    return { pages: [], diagnostics: `reply was ${raw === undefined ? "undefined" : typeof raw}` };
-  }
-
-  const report = raw as Record<string, unknown>;
-  const pages = Array.isArray(report["images"])
-    ? (report["images"] as unknown[]).filter((page): page is string => typeof page === "string")
-    : [];
-
-  const diagnostics = [
-    `reader=${String(report["readerPresent"])}`,
-    `params=${String(report["paramsPresent"])}`,
-    `sources=${String(report["sourceCount"])}`,
-    `readerAreaImgs=${String(report["readerAreaImgs"])}`,
-    `scripts=${String(report["scripts"])}`,
-    `readyState=${String(report["readyState"])}`,
-    report["error"] ? `error=${JSON.stringify(report["error"])}` : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  return { pages, diagnostics };
+  return pages;
 }
 
 export const ScytheScans = new ScytheScansExtension();
