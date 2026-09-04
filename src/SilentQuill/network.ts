@@ -3,12 +3,15 @@
 
 import {
   CloudflareError,
+  type Tag,
   PaperbackInterceptor,
   type Request,
   type Response,
 } from "@paperback/types";
+import * as cheerio from "cheerio";
 
-import { DOMAIN } from "./models";
+import { browseUrl, DOMAIN } from "./models";
+import { parseGenres } from "./parsers";
 
 export class SilentQuillInterceptor extends PaperbackInterceptor {
   override async interceptRequest(request: Request): Promise<Request> {
@@ -51,4 +54,15 @@ export class SilentQuillInterceptor extends PaperbackInterceptor {
 
     return data;
   }
+}
+
+// No try/catch: a Cloudflare challenge here has to reach the app so it can
+// raise its bypass instead of leaving the picker silently empty.
+export async function fetchGenres(): Promise<Tag[]> {
+  const [, buffer] = await Application.scheduleRequest({
+    url: browseUrl(1, "update"),
+    method: "GET",
+  });
+
+  return parseGenres(cheerio.load(Application.arrayBufferToUTF8String(buffer)));
 }

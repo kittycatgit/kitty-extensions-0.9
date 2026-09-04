@@ -34,30 +34,21 @@ import {
   SORTS,
   type CoffeeSearchMetadata,
 } from "./models";
-import { CoffeeMangaInterceptor } from "./network";
-import {
-  parseChapters,
-  parseFeatured,
-  parseGenres,
-  parsePages,
-  parseResults,
-  parseSeries,
-} from "./parsers";
+import { fetchGenres, CoffeeMangaInterceptor } from "./network";
+import { parseChapters, parseFeatured, parsePages, parseResults, parseSeries } from "./parsers";
 import pbconfig from "./pbconfig";
-
-const GENRES_TTL_MS = 24 * 60 * 60 * 1000;
-
-let genreCache: { at: number; genres: Tag[] } | undefined;
 
 class CoffeeMangaExtension implements ExtensionImpl<typeof pbconfig> {
   private readonly interceptor = new CoffeeMangaInterceptor("main");
+
+  private genresPromise?: Promise<Tag[]>;
 
   async initialise(): Promise<void> {
     this.interceptor.registerInterceptor();
   }
 
   async cloudflareBypassCompleted(_request: Request, _cookies: Cookie[]): Promise<void> {
-    // The app's own cookie store keeps the bypass cookies; nothing to hold here.
+    this.genresPromise = undefined;
   }
 
   private async document(url: string): Promise<cheerio.CheerioAPI> {
@@ -134,28 +125,10 @@ class CoffeeMangaExtension implements ExtensionImpl<typeof pbconfig> {
     return this.paged(found, matching, page, { ...metadata, ...(genre ? { genre } : {}) });
   }
 
-  private async genres(): Promise<Tag[]> {
-    if (genreCache && Date.now() - genreCache.at < GENRES_TTL_MS) {
-      return genreCache.genres;
-    }
-
-    try {
-      const genres = parseGenres(await this.document(`${DOMAIN}/?s=&post_type=wp-manga`));
-
-      if (genres.length > 0) {
-        genreCache = { at: Date.now(), genres };
-      }
-
-      return genres;
-    } catch {
-      return genreCache?.genres ?? [];
-    }
-  }
-
   async getAdvancedSearchForm(query: SearchQuery<CoffeeSearchMetadata>): Promise<CoffeeSearchForm> {
     return new CoffeeSearchForm(
       query.metadata as CoffeeSearchMetadata | undefined,
-      await this.genres(),
+      await (this.genresPromise ??= fetchGenres()),
     );
   }
 

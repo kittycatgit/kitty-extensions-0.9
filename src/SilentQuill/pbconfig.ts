@@ -7,7 +7,7 @@ import { ContentRating, SourceIntents } from "@paperback/types";
 export default {
   name: "SilentQuill",
   description: "Extension that pulls content from silentquill.net.",
-  version: "1.0.0",
+  version: "2.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.MATURE,

@@ -7,7 +7,7 @@ import { ContentRating, SourceIntents } from "@paperback/types";
 export default {
   name: "CoffeeManga",
   description: "Extension that pulls content from coffeemanga.net.",
-  version: "1.0.0",
+  version: "2.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.MATURE,
