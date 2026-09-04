@@ -1,5 +1,5 @@
 {
-  "buildTime": "2026-09-02T01:23:51.537Z",
+  "buildTime": "2026-09-04T02:52:47.978Z",
   "builtWith": {
     "toolchain": "1.0.0-alpha.92",
     "types": "1.0.0-alpha.92"
@@ -354,6 +354,30 @@
         }
       ],
       "id": "ZinManga"
+    },
+    {
+      "name": "manga3asq",
+      "description": "Extension that pulls content from 3asq.online.",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "language": "ar",
+      "contentRating": "MATURE",
+      "capabilities": [
+        1,
+        16,
+        4,
+        32,
+        64
+      ],
+      "badges": [],
+      "developers": [
+        {
+          "name": "kittycatgit",
+          "website": "https://github.com/kittycatgit",
+          "github": "https://github.com/kittycatgit"
+        }
+      ],
+      "id": "manga3asq"
     }
   ]
 }
