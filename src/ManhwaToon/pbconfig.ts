@@ -1,22 +1,28 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-/* Copyright © 2026 Inkdex */
+/* Copyright © 2026 kittycatgit */
 
-import { ContentRating } from "@paperback/types";
+import type { ExtensionInfo } from "@paperback/types";
+import { ContentRating, SourceIntents } from "@paperback/types";
 
-import { basePbConfig } from "../generic/config";
-
-let pbConfig = basePbConfig;
-
-pbConfig.name = "ManhwaToon";
-pbConfig.description = "Extension that pulls content from manhwatoon.me.";
-pbConfig.version = "3.0.0";
-pbConfig.contentRating = ContentRating.ADULT;
-pbConfig.developers = [
-  {
-    name: "kittycatgit",
-    website: "https://github.com/kittycatgit",
-    github: "https://github.com/kittycatgit",
-  },
-];
-
-export default pbConfig;
+export default {
+  name: "ManhwaToon",
+  description: "Extension that pulls content from manhwatoon.me.",
+  version: "4.0.0",
+  icon: "icon.png",
+  language: "en",
+  contentRating: ContentRating.ADULT,
+  capabilities: [
+    SourceIntents.CHAPTER_PROVIDING,
+    SourceIntents.SEARCH_RESULT_PROVIDING,
+    SourceIntents.DISCOVER_SECTION_PROVIDING,
+    SourceIntents.CLOUDFLARE_BYPASS_PROVIDING,
+  ],
+  badges: [],
+  developers: [
+    {
+      name: "kittycatgit",
+      website: "https://github.com/kittycatgit",
+      github: "https://github.com/kittycatgit",
+    },
+  ],
+} satisfies ExtensionInfo;

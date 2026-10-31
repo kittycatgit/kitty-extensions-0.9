@@ -12,11 +12,13 @@ import { DOMAIN } from "./models";
 
 export class CoffeeMangaInterceptor extends PaperbackInterceptor {
   override async interceptRequest(request: Request): Promise<Request> {
+    // Defaults only: the page manifest is refused unless its referer is the
+    // chapter page, so a caller's own headers win.
     request.headers = {
-      ...request.headers,
       "user-agent": await Application.getDefaultUserAgent(),
       referer: `${DOMAIN}/`,
       "accept-language": "en-US,en;q=0.9",
+      ...request.headers,
     };
 
     return request;

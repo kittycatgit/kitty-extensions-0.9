@@ -17,37 +17,38 @@ import {
   type SourceManga,
   type Tag,
 } from "@paperback/types";
-import * as cheerio from "cheerio";
 
 import { CoffeeSearchForm } from "./forms";
 import {
-  browseUrl,
+  CHAPTER_BATCH,
   chapterUrl,
-  chaptersUrl,
+  chaptersJsonUrl,
   DOMAIN,
-  FEATURED_ROW,
-  genreUrl,
+  libraryUrl,
   ROWS,
   searchUrl,
-  SEEN_LIMIT,
   seriesUrl,
   SORTS,
+  type Card,
+  type ChapterPage,
   type CoffeeSearchMetadata,
+  type HomeProps,
+  type ListingProps,
+  type ReaderProps,
+  type Row,
+  type SeriesProps,
 } from "./models";
 import { CoffeeMangaInterceptor } from "./network";
-import {
-  parseChapters,
-  parseFeatured,
-  parseGenres,
-  parsePages,
-  parseResults,
-  parseSeries,
-} from "./parsers";
+import { cardsToResults, cardToItem, inertia, parseChapterRows, parseSeries } from "./parsers";
 import pbconfig from "./pbconfig";
+import { appScriptUrl, deriveKey, manifestPages, manifestUrl, readerConfig } from "./reader";
 
 const GENRES_TTL_MS = 24 * 60 * 60 * 1000;
 
 let genreCache: { at: number; genres: Tag[] } | undefined;
+
+// The app bundle is ~350 KB and only changes on deploy; keep one key per URL.
+let keyCache: { url: string; key: Uint8Array } | undefined;
 
 class CoffeeMangaExtension implements ExtensionImpl<typeof pbconfig> {
   private readonly interceptor = new CoffeeMangaInterceptor("main");
@@ -60,44 +61,120 @@ class CoffeeMangaExtension implements ExtensionImpl<typeof pbconfig> {
     // The app's own cookie store keeps the bypass cookies; nothing to hold here.
   }
 
-  private async document(url: string): Promise<cheerio.CheerioAPI> {
-    const [, buffer] = await Application.scheduleRequest({ url, method: "GET" });
+  private async text(url: string, headers: Record<string, string> = {}): Promise<string> {
+    const [, buffer] = await Application.scheduleRequest({ url, method: "GET", headers });
 
-    return cheerio.load(Application.arrayBufferToUTF8String(buffer));
+    return Application.arrayBufferToUTF8String(buffer);
+  }
+
+  private async page<P>(url: string): Promise<P> {
+    return inertia<P>(await this.text(url)).props;
   }
 
   async getMangaDetails(mangaId: string): Promise<SourceManga> {
-    return parseSeries(await this.document(seriesUrl(mangaId)), mangaId);
+    return parseSeries(await this.page<SeriesProps>(seriesUrl(mangaId)), mangaId);
   }
 
-  // The series page's own chapter JSON is served stale and truncated; this
-  // POST route is uncached and complete.
   async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
-    const [, buffer] = await Application.scheduleRequest({
-      url: chaptersUrl(sourceManga.mangaId),
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-    });
+    const slug = sourceManga.mangaId;
+    const first = await this.chapterPage(slug, 1);
+    const rows = [...first.items];
 
-    const $ = cheerio.load(Application.arrayBufferToUTF8String(buffer));
-    const chapters = parseChapters($, sourceManga);
+    for (let page = 2; page <= first.last; page += CHAPTER_BATCH) {
+      const batch = [];
 
-    if (chapters.length === 0) {
-      throw new Error(`No chapters were listed for ${sourceManga.mangaId}.`);
+      for (let n = page; n < page + CHAPTER_BATCH && n <= first.last; n++) {
+        batch.push(this.chapterPage(slug, n));
+      }
+
+      for (const result of await Promise.all(batch)) {
+        rows.push(...result.items);
+      }
     }
 
-    return chapters;
+    const seen = new Set<string>();
+    const chapters = parseChapterRows(
+      rows.filter((row) => !seen.has(row.slug) && seen.add(row.slug)),
+      sourceManga,
+    );
+
+    if (chapters.length === 0) {
+      throw new Error(`No chapters were listed for ${slug}.`);
+    }
+
+    chapters.sort((a, b) => b.chapNum - a.chapNum);
+
+    return chapters.map((chapter, index) => ({
+      ...chapter,
+      sortingIndex: chapters.length - index,
+    }));
   }
 
+  private async chapterPage(slug: string, page: number): Promise<ChapterPage> {
+    const body = JSON.parse(
+      await this.text(chaptersJsonUrl(slug, page), { accept: "application/json" }),
+    ) as Partial<ChapterPage>;
+
+    if (!Array.isArray(body.items) || typeof body.last !== "number") {
+      throw new Error(`The chapter list for ${slug} has an unexpected shape.`);
+    }
+
+    return { items: body.items, page: body.page ?? page, last: body.last, total: body.total };
+  }
+
+  // The reader page lists only its first image; the rest come from a manifest
+  // route whose name and parameters sit encrypted in the page props.
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
-    const $ = await this.document(chapterUrl(chapter.sourceManga.mangaId, chapter.chapterId));
-    const pages = parsePages($);
+    const url = chapterUrl(chapter.sourceManga.mangaId, chapter.chapterId);
+    const html = await this.text(url);
+    const props = inertia<ReaderProps>(html).props;
+    const chapterId = props.chapter?.id;
+    const token = props.reader?.x;
+    const slug = props.series?.slug ?? chapter.sourceManga.mangaId;
+
+    if (typeof chapterId !== "number" || !token) {
+      throw new Error(`The reader page for ${chapter.chapterId} carried no reader token.`);
+    }
+
+    const config = readerConfig(token, chapterId, await this.readerKey(appScriptUrl(html)));
+    const [response, buffer] = await Application.scheduleRequest({
+      url: manifestUrl(config, chapterId, slug),
+      method: "GET",
+      headers: {
+        accept: "application/json",
+        referer: url,
+        "sec-fetch-site": "same-origin",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-dest": "empty",
+      },
+    });
+
+    if (response.status === 428) {
+      throw new Error("The site is asking for a browser verification before serving pages.");
+    }
+
+    if (response.status !== 200) {
+      throw new Error(`The page manifest answered ${response.status} for ${chapter.chapterId}.`);
+    }
+
+    const pages = manifestPages(Application.arrayBufferToUTF8String(buffer), config, chapterId);
 
     if (pages.length === 0) {
       throw new Error(`No pages were listed for ${chapter.chapterId}.`);
     }
 
     return { id: chapter.chapterId, mangaId: chapter.sourceManga.mangaId, pages };
+  }
+
+  private async readerKey(scriptUrl: string): Promise<Uint8Array> {
+    if (keyCache?.url === scriptUrl) {
+      return keyCache.key;
+    }
+
+    const key = deriveKey(await this.text(scriptUrl));
+    keyCache = { url: scriptUrl, key };
+
+    return key;
   }
 
   async getSortingOptions(): Promise<SortingOption[]> {
@@ -115,23 +192,49 @@ class CoffeeMangaExtension implements ExtensionImpl<typeof pbconfig> {
 
     const page = metadata?.page ?? 1;
     const title = (query.title ?? "").trim();
-    const genre = (query.metadata as CoffeeSearchMetadata | undefined)?.genre ?? metadata?.genre;
+    const filters = {
+      genre: query.metadata?.genre ?? metadata?.genre ?? "",
+      type: query.metadata?.type ?? metadata?.type ?? "",
+      status: query.metadata?.status ?? metadata?.status ?? "",
+      section: query.metadata?.section ?? metadata?.section ?? "",
+    };
+    const filtered = Object.values(filters).some(Boolean);
 
-    // A genre page cannot be searched by title, so when both are given the
-    // genre picks the listing and the title filters what comes back.
-    const url = genre
-      ? genreUrl(genre, page, sortingOption?.id)
+    // /search knows only the title; the library knows every filter but no
+    // title. With both, the filtered listing is matched page by page.
+    const listing = filtered
+      ? await this.page<ListingProps>(
+          libraryUrl(page, {
+            orden: sortingOption?.id ?? "reciente",
+            genero: filters.genre,
+            tipo: filters.type,
+            estado: filters.status,
+            seccion: filters.section,
+          }),
+        )
       : title
-        ? searchUrl(title, page)
-        : browseUrl(page, sortingOption?.id ?? "views");
+        ? await this.page<ListingProps>(searchUrl(title, page))
+        : await this.page<ListingProps>(libraryUrl(page, { orden: sortingOption?.id ?? "vistas" }));
 
-    const found = parseResults(await this.document(url));
-    const matching =
-      genre && title
+    const found = cardsToResults(listing.series);
+    const items =
+      filtered && title
         ? found.filter((item) => item.title.toLowerCase().includes(title.toLowerCase()))
         : found;
 
-    return this.paged(found, matching, page, { ...metadata, ...(genre ? { genre } : {}) });
+    const last = listing.pagination?.last ?? page;
+    const carried = {
+      ...(filters.genre ? { genre: filters.genre } : {}),
+      ...(filters.type ? { type: filters.type } : {}),
+      ...(filters.status ? { status: filters.status } : {}),
+      ...(filters.section ? { section: filters.section } : {}),
+    };
+
+    return {
+      items,
+      metadata:
+        found.length === 0 || page >= last ? { completed: true } : { ...carried, page: page + 1 },
+    };
   }
 
   private async genres(): Promise<Tag[]> {
@@ -139,35 +242,30 @@ class CoffeeMangaExtension implements ExtensionImpl<typeof pbconfig> {
       return genreCache.genres;
     }
 
-    try {
-      const genres = parseGenres(await this.document(`${DOMAIN}/?s=&post_type=wp-manga`));
+    const listing = await this.page<ListingProps>(libraryUrl(1, {}));
+    const genres: Tag[] = (listing.filters?.genres ?? [])
+      .filter((genre) => genre.slug && genre.name)
+      .map((genre) => ({ id: genre.slug, title: genre.name.trim() }));
 
-      if (genres.length > 0) {
-        genreCache = { at: Date.now(), genres };
-      }
-
-      return genres;
-    } catch {
-      return genreCache?.genres ?? [];
+    if (genres.length === 0) {
+      throw new Error("The library page listed no genres.");
     }
+
+    genreCache = { at: Date.now(), genres };
+
+    return genres;
   }
 
   async getAdvancedSearchForm(query: SearchQuery<CoffeeSearchMetadata>): Promise<CoffeeSearchForm> {
-    return new CoffeeSearchForm(
-      query.metadata as CoffeeSearchMetadata | undefined,
-      await this.genres(),
-    );
+    return new CoffeeSearchForm(query.metadata, await this.genres());
   }
 
   async getDiscoverSections(): Promise<DiscoverSection[]> {
-    return [
-      { id: FEATURED_ROW.id, title: FEATURED_ROW.title, type: DiscoverSectionType.featured },
-      ...ROWS.map((row) => ({
-        id: row.id,
-        title: row.title,
-        type: DiscoverSectionType.simpleCarousel,
-      })),
-    ];
+    return ROWS.map((row) => ({
+      id: row.id,
+      title: row.title,
+      type: DiscoverSectionType[row.type],
+    }));
   }
 
   async getDiscoverSectionItems(
@@ -178,62 +276,63 @@ class CoffeeMangaExtension implements ExtensionImpl<typeof pbconfig> {
       return { items: [] };
     }
 
-    // The hero is a fixed set of slides on the home page rather than a listing.
-    if (section.id === FEATURED_ROW.id) {
-      return { items: parseFeatured(await this.document(`${DOMAIN}/`)) };
-    }
+    const row = ROWS.find((entry) => entry.id === section.id);
 
-    const ordering = ROWS.find((row) => row.id === section.id)?.ordering;
-
-    if (!ordering) {
+    if (!row) {
       throw new Error(`Invalid sectionId provided: ${section.id}`);
     }
 
-    const page = metadata?.page ?? 1;
-    const found = parseResults(await this.document(browseUrl(page, ordering)));
-    const results = this.paged(found, found, page, metadata);
+    if (row.source.kind === "library") {
+      const page = metadata?.page ?? 1;
+      const listing = await this.page<ListingProps>(libraryUrl(page, { orden: row.source.order }));
+      const items = this.items(row, listing.series ?? []);
+      const last = listing.pagination?.last ?? page;
 
-    return {
-      items: results.items.map((item) => ({
-        type: "simpleCarouselItem" as const,
-        mangaId: item.mangaId,
-        imageUrl: item.imageUrl,
-        title: item.title,
-        ...(item.subtitle ? { subtitle: item.subtitle } : {}),
-      })),
-      metadata: results.metadata,
-    };
+      return {
+        items,
+        metadata: items.length === 0 || page >= last ? { completed: true } : { page: page + 1 },
+      };
+    }
+
+    const home = await this.page<HomeProps>(`${DOMAIN}/`);
+
+    if (row.source.kind === "genres") {
+      const items: DiscoverSectionItem[] = (home.genres ?? [])
+        .filter((genre) => genre.slug && genre.name)
+        .map((genre) => ({
+          type: "genresCarouselItem" as const,
+          name: genre.name.trim(),
+          searchQuery: { title: "", filters: [], metadata: { genre: genre.slug } },
+        }));
+
+      return { items, metadata: { completed: true } };
+    }
+
+    const cards =
+      row.source.kind === "heroes"
+        ? (home.heroes ?? [])
+        : (home.sections?.find((entry) => entry.code === (row.source as { code: string }).code)
+            ?.items ?? []);
+
+    if (cards.length === 0) {
+      throw new Error(`The home page carried no "${row.title}" rail.`);
+    }
+
+    return { items: this.items(row, cards), metadata: { completed: true } };
   }
 
-  // Past the last page the site repeats it rather than 404ing, so an all-seen
-  // page ends the row. `found` decides that, `matching` is what the caller gets.
-  private paged(
-    found: SearchResultItem[],
-    matching: SearchResultItem[],
-    page: number,
-    metadata: CoffeeSearchMetadata | undefined,
-  ): PagedResults<SearchResultItem> {
-    const seen = new Set(metadata?.seen ?? []);
-    const fresh = found.filter((item) => !seen.has(item.mangaId));
+  private items(row: Row, cards: Card[]): DiscoverSectionItem[] {
+    const seen = new Set<string>();
+    const items: DiscoverSectionItem[] = [];
 
-    if (found.length === 0 || fresh.length === 0) {
-      return { items: [], metadata: { completed: true } };
+    for (const card of cards) {
+      if (card.slug && card.title && !seen.has(card.slug) && row.type !== "genres") {
+        seen.add(card.slug);
+        items.push(cardToItem(card, row.type));
+      }
     }
 
-    for (const item of found) {
-      seen.add(item.mangaId);
-    }
-
-    const freshIds = new Set(fresh.map((item) => item.mangaId));
-
-    return {
-      items: matching.filter((item) => freshIds.has(item.mangaId)),
-      metadata: {
-        ...metadata,
-        page: page + 1,
-        seen: [...seen].slice(-SEEN_LIMIT),
-      },
-    };
+    return items;
   }
 }
 

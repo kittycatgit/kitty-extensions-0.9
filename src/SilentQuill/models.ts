@@ -1,56 +1,77 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright © 2026 kittycatgit */
 
-export const DOMAIN = "https://www.silentquill.net";
+import { DiscoverSectionType } from "@paperback/types";
 
-// Series and chapters both live at the site root; only the slug identifies them.
-export const seriesUrl = (slug: string): string => `${DOMAIN}/${slug}/`;
+export const DOMAIN = "https://silentquill.net";
 
+export const seriesUrl = (slug: string): string => `${DOMAIN}/series/${slug}/`;
+
+// Chapters resolve from the site root by their own slug.
 export const chapterUrl = (slug: string): string => `${DOMAIN}/${slug}/`;
 
-export const browseUrl = (page: number, order: string, extra = ""): string =>
-  `${DOMAIN}/manga/?page=${page}&order=${order}${extra}`;
+export const homeUrl = (page: number): string =>
+  page > 1 ? `${DOMAIN}/?page=${page}` : `${DOMAIN}/`;
 
-// Filters are dropped when a title is supplied, so the two never share a URL.
-export const searchUrl = (title: string, page: number): string =>
-  `${DOMAIN}/page/${page}/?s=${encodeURIComponent(title)}`;
+export const searchUrl = (query: Record<string, string>): string => {
+  const parts = Object.entries(query)
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`);
+
+  return `${DOMAIN}/search/${parts.length ? `?${parts.join("&")}` : ""}`;
+};
 
 export type SilentQuillMetadata = {
   page?: number;
   completed?: boolean;
-  genres?: string[];
-  status?: string;
-  type?: string;
   seen?: string[];
+  genre?: string;
+  status?: string;
 };
-
-export const ORDERS = [
-  { id: "update", label: "Latest Update" },
-  { id: "popular", label: "Popular" },
-  { id: "latest", label: "Recently Added" },
-  { id: "title", label: "A-Z" },
-  { id: "titlereverse", label: "Z-A" },
-];
 
 export const STATUSES = [
   { id: "ongoing", title: "Ongoing" },
   { id: "completed", title: "Completed" },
-  { id: "hiatus", title: "Hiatus" },
 ];
 
-export const TYPES = [
-  { id: "manga", title: "Manga" },
-  { id: "manhwa", title: "Manhwa" },
-  { id: "manhua", title: "Manhua" },
-  { id: "comic", title: "Comic" },
-  { id: "novel", title: "Novel" },
-];
+export type Row = {
+  id: string;
+  title: string;
+  type: DiscoverSectionType;
+  source: "featured" | "latest" | "top" | "genres" | "search";
+  query?: Record<string, string>;
+};
 
-// Titles follow the site's own home page rails.
-export const ROWS = [
-  { id: "new_releases", title: "New Releases", order: "update" },
-  { id: "popular", title: "Popular", order: "popular" },
-  { id: "new_series", title: "New Series", order: "latest" },
+// One rail per block of the home page, plus the two status listings.
+export const ROWS: Row[] = [
+  { id: "featured", title: "Featured", type: DiscoverSectionType.featured, source: "featured" },
+  {
+    id: "latest",
+    title: "Latest releases",
+    type: DiscoverSectionType.chapterUpdates,
+    source: "latest",
+  },
+  {
+    id: "top",
+    title: "Top 10 this week",
+    type: DiscoverSectionType.prominentCarousel,
+    source: "top",
+  },
+  {
+    id: "ongoing",
+    title: "Ongoing",
+    type: DiscoverSectionType.simpleCarousel,
+    source: "search",
+    query: { status: "ongoing" },
+  },
+  {
+    id: "completed",
+    title: "Completed",
+    type: DiscoverSectionType.simpleCarousel,
+    source: "search",
+    query: { status: "completed" },
+  },
+  { id: "genres", title: "Genres", type: DiscoverSectionType.genres, source: "genres" },
 ];
 
 export const SEEN_LIMIT = 360;

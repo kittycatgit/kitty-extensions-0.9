@@ -11,50 +11,43 @@ import {
   type Tag,
 } from "@paperback/types";
 
-import { STATUSES, TYPES, type SilentQuillMetadata } from "./models";
+import { STATUSES, type SilentQuillMetadata } from "./models";
 
 export class SilentQuillSearchForm extends AdvancedSearchForm {
   private readonly options: Tag[];
 
-  private genres: string[];
+  private genre: string[];
 
   private status: string[];
-
-  private type: string[];
 
   constructor(metadata: SilentQuillMetadata | undefined, options: Tag[]) {
     super();
     this.options = options;
-    this.genres = metadata?.genres ?? [];
+    this.genre = metadata?.genre ? [metadata.genre] : [];
     this.status = metadata?.status ? [metadata.status] : [];
-    this.type = metadata?.type ? [metadata.type] : [];
   }
 
   override getSections(): FormSectionElement<unknown>[] {
     return [
       Section(
         {
-          id: "genres",
-          header: "Genres",
-          // The site drops every filter as soon as a title is typed, so the two
-          // cannot be sent together.
-          footer:
-            this.options.length > 0
-              ? "Combine genres with a title and the title is matched against the filtered list."
-              : "Genres could not be loaded. Search by title still works.",
+          id: "genre",
+          header: "Genre",
+          // The search endpoint takes a single genre alongside the title.
+          footer: "One genre at a time; it combines with the title and status.",
         },
         this.options.length === 0
           ? [LabelRow("unavailable", { title: "Genres could not be loaded" })]
           : [
-              SelectRow("genres", {
-                title: "Genres",
+              SelectRow("genre", {
+                title: "Genre",
                 layout: "flow",
-                value: this.genres,
+                value: this.genre,
                 items: this.options.map((genre) => ({ id: genre.id, title: genre.title })),
                 minItemCount: 0,
-                maxItemCount: this.options.length,
-                onValueChange: closureSelector(this, "genres", async (value: string[]) => {
-                  this.genres = value;
+                maxItemCount: 1,
+                onValueChange: closureSelector(this, "genre", async (value: string[]) => {
+                  this.genre = value;
                   this.reloadForm();
                 }),
               }),
@@ -74,29 +67,14 @@ export class SilentQuillSearchForm extends AdvancedSearchForm {
           }),
         }),
       ]),
-      Section({ id: "type", header: "Type" }, [
-        SelectRow("type", {
-          title: "Type",
-          layout: "flow",
-          value: this.type,
-          items: TYPES.map((entry) => ({ id: entry.id, title: entry.title })),
-          minItemCount: 0,
-          maxItemCount: 1,
-          onValueChange: closureSelector(this, "type", async (value: string[]) => {
-            this.type = value;
-            this.reloadForm();
-          }),
-        }),
-      ]),
     ];
   }
 
   override getSearchQueryMetadata(): SilentQuillMetadata {
     // An explicit undefined cannot cross the bridge, so omit empty keys.
     return {
-      ...(this.genres.length > 0 ? { genres: this.genres } : {}),
+      ...(this.genre[0] ? { genre: this.genre[0] } : {}),
       ...(this.status[0] ? { status: this.status[0] } : {}),
-      ...(this.type[0] ? { type: this.type[0] } : {}),
     };
   }
 }

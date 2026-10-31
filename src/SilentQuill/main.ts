@@ -21,17 +21,30 @@ import * as cheerio from "cheerio";
 
 import { SilentQuillSearchForm } from "./forms";
 import {
-  browseUrl,
   chapterUrl,
-  ORDERS,
+  homeUrl,
   ROWS,
   searchUrl,
   SEEN_LIMIT,
   seriesUrl,
+  type Row,
   type SilentQuillMetadata,
 } from "./models";
 import { SilentQuillInterceptor } from "./network";
-import { parseChapters, parseGenres, parsePages, parseResults, parseSeries } from "./parsers";
+import {
+  flight,
+  hydrate,
+  parseChapters,
+  parseFeatured,
+  parseGenreCloud,
+  parseGenres,
+  parseLatest,
+  parsePages,
+  parseSearch,
+  parseSeries,
+  parseTop,
+  type Card,
+} from "./parsers";
 import pbconfig from "./pbconfig";
 
 const GENRES_TTL_MS = 24 * 60 * 60 * 1000;
@@ -56,7 +69,7 @@ class SilentQuillExtension implements ExtensionImpl<typeof pbconfig> {
   }
 
   private async document(url: string): Promise<cheerio.CheerioAPI> {
-    return cheerio.load(await this.getText(url));
+    return hydrate(cheerio.load(await this.getText(url)));
   }
 
   async getMangaDetails(mangaId: string): Promise<SourceManga> {
@@ -65,7 +78,7 @@ class SilentQuillExtension implements ExtensionImpl<typeof pbconfig> {
 
   async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
     const chapters = parseChapters(
-      await this.document(seriesUrl(sourceManga.mangaId)),
+      flight(await this.getText(seriesUrl(sourceManga.mangaId))),
       sourceManga,
     );
 
@@ -77,7 +90,7 @@ class SilentQuillExtension implements ExtensionImpl<typeof pbconfig> {
   }
 
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
-    const pages = parsePages(await this.getText(chapterUrl(chapter.chapterId)));
+    const pages = parsePages(flight(await this.getText(chapterUrl(chapter.chapterId))));
 
     if (pages.length === 0) {
       throw new Error(`No pages were listed for ${chapter.chapterId}.`);
@@ -86,55 +99,29 @@ class SilentQuillExtension implements ExtensionImpl<typeof pbconfig> {
     return { id: chapter.chapterId, mangaId: chapter.sourceManga.mangaId, pages };
   }
 
+  // The listing only orders by latest update.
   async getSortingOptions(): Promise<SortingOption[]> {
-    return ORDERS.map((order) => ({ id: order.id, label: order.label }));
-  }
-
-  private filterQuery(metadata: SilentQuillMetadata | undefined): string {
-    const parts = (metadata?.genres ?? []).map(
-      (genre) => `&genre%5B%5D=${encodeURIComponent(genre)}`,
-    );
-
-    if (metadata?.status) {
-      parts.push(`&status=${encodeURIComponent(metadata.status)}`);
-    }
-
-    if (metadata?.type) {
-      parts.push(`&type=${encodeURIComponent(metadata.type)}`);
-    }
-
-    return parts.join("");
+    return [{ id: "update", label: "Latest Update" }];
   }
 
   async getSearchResults(
     query: SearchQuery<SilentQuillMetadata>,
     metadata: SilentQuillMetadata | undefined,
-    sortingOption: SortingOption | undefined,
   ): Promise<PagedResults<SearchResultItem>> {
     if (metadata?.completed) {
       return { items: [] };
     }
 
     const page = metadata?.page ?? 1;
-    const title = (query.title ?? "").trim();
     const filters = { ...(query.metadata as SilentQuillMetadata | undefined), ...metadata };
-    const filterQuery = this.filterQuery(filters);
+    const url = searchUrl({
+      q: (query.title ?? "").trim(),
+      genre: filters.genre ?? "",
+      status: filters.status ?? "",
+      page: page > 1 ? String(page) : "",
+    });
 
-    // Filters are ignored on a title search, so when both are set the filters
-    // pick the listing and the title matches against what comes back.
-    const url = filterQuery
-      ? browseUrl(page, sortingOption?.id ?? "update", filterQuery)
-      : title
-        ? searchUrl(title, page)
-        : browseUrl(page, sortingOption?.id ?? "update");
-
-    const found = parseResults(await this.document(url));
-    const matching =
-      filterQuery && title
-        ? found.filter((item) => item.title.toLowerCase().includes(title.toLowerCase()))
-        : found;
-
-    return this.paged(found, matching, page, { ...metadata, ...filters });
+    return this.paged(parseSearch(await this.document(url)), page, filters);
   }
 
   private async genres(): Promise<Tag[]> {
@@ -142,17 +129,13 @@ class SilentQuillExtension implements ExtensionImpl<typeof pbconfig> {
       return genreCache.genres;
     }
 
-    try {
-      const genres = parseGenres(await this.document(browseUrl(1, "update")));
+    const genres = parseGenres(await this.document(searchUrl({})));
 
-      if (genres.length > 0) {
-        genreCache = { at: Date.now(), genres };
-      }
-
-      return genres;
-    } catch {
-      return genreCache?.genres ?? [];
+    if (genres.length > 0) {
+      genreCache = { at: Date.now(), genres };
     }
+
+    return genres;
   }
 
   async getAdvancedSearchForm(
@@ -165,11 +148,7 @@ class SilentQuillExtension implements ExtensionImpl<typeof pbconfig> {
   }
 
   async getDiscoverSections(): Promise<DiscoverSection[]> {
-    return ROWS.map((row, index) => ({
-      id: row.id,
-      title: row.title,
-      type: index === 0 ? DiscoverSectionType.featured : DiscoverSectionType.simpleCarousel,
-    }));
+    return ROWS.map((row) => ({ id: row.id, title: row.title, type: row.type }));
   }
 
   async getDiscoverSectionItems(
@@ -180,60 +159,110 @@ class SilentQuillExtension implements ExtensionImpl<typeof pbconfig> {
       return { items: [] };
     }
 
-    const order = ROWS.find((row) => row.id === section.id)?.order;
+    const row = ROWS.find((entry) => entry.id === section.id);
 
-    if (!order) {
+    if (!row) {
       throw new Error(`Invalid sectionId provided: ${section.id}`);
     }
 
     const page = metadata?.page ?? 1;
-    const found = parseResults(await this.document(browseUrl(page, order)));
-    const results = this.paged(found, found, page, metadata);
 
-    return {
-      items: results.items.map((item) => ({
-        type:
-          section.id === ROWS[0]!.id
-            ? ("featuredCarouselItem" as const)
-            : ("simpleCarouselItem" as const),
-        mangaId: item.mangaId,
-        imageUrl: item.imageUrl,
-        title: item.title,
-        ...(item.subtitle ? { subtitle: item.subtitle } : {}),
-      })) as DiscoverSectionItem[],
-      metadata: results.metadata,
-    };
+    switch (row.source) {
+      case "genres": {
+        const genres = parseGenreCloud(await this.document(homeUrl(1)));
+
+        return {
+          items: genres.map((genre) => ({
+            type: "genresCarouselItem" as const,
+            name: genre.title,
+            searchQuery: { title: "", filters: [], metadata: { genre: genre.id } },
+          })),
+          metadata: { completed: true },
+        };
+      }
+      case "featured": {
+        const cards = parseFeatured(flight(await this.getText(homeUrl(1))));
+
+        return { items: cards.map((card) => this.item(row, card)), metadata: { completed: true } };
+      }
+      case "top": {
+        const cards = parseTop(await this.document(homeUrl(1)));
+
+        return { items: cards.map((card) => this.item(row, card)), metadata: { completed: true } };
+      }
+      case "latest": {
+        const results = this.paged(parseLatest(await this.document(homeUrl(page))), page, metadata);
+
+        return {
+          items: results.items.map((card) => this.item(row, card)),
+          metadata: results.metadata,
+        };
+      }
+      default: {
+        const url = searchUrl({ ...row.query, page: page > 1 ? String(page) : "" });
+        const results = this.paged(parseSearch(await this.document(url)), page, metadata);
+
+        return {
+          items: results.items.map((card) => this.item(row, card)),
+          metadata: results.metadata,
+        };
+      }
+    }
   }
 
-  // Past the last page the site serves the last one again rather than 404ing,
-  // so an all-seen page ends the row. `found` decides whether the source is
-  // exhausted, `matching` is what the caller asked for.
+  private item(row: Row, card: Card): DiscoverSectionItem {
+    const base = { mangaId: card.mangaId, imageUrl: card.imageUrl, title: card.title };
+
+    switch (row.type) {
+      case DiscoverSectionType.featured:
+        return {
+          type: "featuredCarouselItem",
+          ...base,
+          ...(card.subtitle ? { summary: card.subtitle } : {}),
+        };
+      case DiscoverSectionType.prominentCarousel:
+        return {
+          type: "prominentCarouselItem",
+          ...base,
+          ...(card.subtitle ? { subtitle: card.subtitle } : {}),
+        };
+      case DiscoverSectionType.chapterUpdates:
+        return {
+          type: "chapterUpdatesCarouselItem",
+          ...base,
+          chapterId: card.chapterId ?? "",
+          ...(card.subtitle ? { subtitle: card.subtitle } : {}),
+        };
+      default:
+        return {
+          type: "simpleCarouselItem",
+          ...base,
+          ...(card.subtitle ? { subtitle: card.subtitle } : {}),
+        };
+    }
+  }
+
+  // Past the last page the site serves an empty listing; the seen set also
+  // drops a series that straddles two pages.
   private paged(
-    found: SearchResultItem[],
-    matching: SearchResultItem[],
+    found: Card[],
     page: number,
     metadata: SilentQuillMetadata | undefined,
-  ): PagedResults<SearchResultItem> {
+  ): PagedResults<Card> {
     const seen = new Set(metadata?.seen ?? []);
     const fresh = found.filter((item) => !seen.has(item.mangaId));
 
-    if (found.length === 0 || fresh.length === 0) {
+    if (fresh.length === 0) {
       return { items: [], metadata: { completed: true } };
     }
 
-    for (const item of found) {
+    for (const item of fresh) {
       seen.add(item.mangaId);
     }
 
-    const freshIds = new Set(fresh.map((item) => item.mangaId));
-
     return {
-      items: matching.filter((item) => freshIds.has(item.mangaId)),
-      metadata: {
-        ...metadata,
-        page: page + 1,
-        seen: [...seen].slice(-SEEN_LIMIT),
-      },
+      items: fresh,
+      metadata: { ...metadata, page: page + 1, seen: [...seen].slice(-SEEN_LIMIT) },
     };
   }
 }
