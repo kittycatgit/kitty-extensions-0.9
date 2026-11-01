@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex" />
-    <title>Comick login</title>
+    <title>Comick login for Paperback</title>
     <style>
       :root {
         color-scheme: dark;
@@ -14,6 +14,7 @@
         --muted: #9aa1ad;
         --accent: #3b82f6;
         --danger: #ef4444;
+        --ok: #22c55e;
       }
       * {
         box-sizing: border-box;
@@ -52,15 +53,21 @@
       .button {
         display: block;
         width: 100%;
-        padding: 14px;
+        padding: 16px;
         border: 0;
         border-radius: 12px;
         background: var(--accent);
         color: #fff;
         font: inherit;
+        font-size: 1.05rem;
         font-weight: 600;
         text-align: center;
+        text-decoration: none;
         cursor: pointer;
+      }
+      .button.secondary {
+        margin-top: 10px;
+        background: #262a33;
       }
       code {
         display: block;
@@ -69,13 +76,16 @@
         border-radius: 10px;
         background: #0b0d11;
         font:
-          20px/1.4 ui-monospace,
+          15px/1.4 ui-monospace,
           SFMono-Regular,
           Menlo,
           monospace;
         word-break: break-all;
         user-select: all;
         -webkit-user-select: all;
+      }
+      .ok h1 {
+        color: var(--ok);
       }
       .error h1 {
         color: var(--danger);
@@ -91,68 +101,221 @@
     </style>
   </head>
   <body>
-    <main id="ok" class="hidden">
-      <h1>Comick approved Paperback</h1>
-      <p>
-        Copy this code, close this window, then paste it into Authorization code in Paperback's
-        Comick settings and tap Connect.
-      </p>
-      <code id="code"></code>
-      <button id="copy" class="button" type="button">Copy code</button>
-      <small>The code only works once and expires in a few minutes.</small>
+    <main id="start" class="hidden">
+      <h1>Connect Comick to Paperback</h1>
+      <p>Sign in on comick.dev and approve Paperback. You come back here with a login token.</p>
+      <button id="signin" class="button" type="button">Sign in with Comick</button>
+      <small>Keep "offline access" ticked on the approval screen, or no token is issued.</small>
     </main>
-    <main id="denied" class="hidden error">
-      <h1>Login cancelled</h1>
-      <p id="deniedText">
-        Comick did not grant Paperback access. Go back to the app and try again.
-      </p>
+    <main id="busy" class="hidden">
+      <h1>Finishing sign-in…</h1>
+      <p>Asking Comick for your login token.</p>
     </main>
-    <main id="empty" class="hidden error">
-      <h1>Nothing to do here</h1>
-      <p>This page only completes a Comick login started from Paperback.</p>
+    <main id="done" class="hidden ok">
+      <h1 id="who">Signed in</h1>
+      <p>Paste this into Login token in Paperback's Comick settings and tap Connect.</p>
+      <small>Paperback login token</small>
+      <code id="token"></code>
+      <button id="copy" class="button" type="button">Copy token</button>
+      <small
+        >It works once and expires in 30 days; Paperback renews it on its own after that.</small
+      >
+    </main>
+    <main id="failed" class="hidden error">
+      <h1 id="failedTitle">Sign-in failed</h1>
+      <p id="failedText"></p>
+      <button id="retry" class="button" type="button">Try again</button>
     </main>
     <script>
       (function () {
-        var params = new URLSearchParams(location.search);
-        var code = params.get("code");
-        var error = params.get("error");
+        var CLIENT_ID = "NYkivlMXotQixhHCmArAhyyrAEmiqHYu";
+        var REDIRECT_URI = "https://kittycatgit.github.io/kitty-extensions-0.9/oauth/comick/";
+        var RESOURCE = "https://api.comick.dev/integrations/v1";
+        var AUTHORIZE = "https://comick.dev/api/auth/oauth2/authorize";
+        var TOKEN = "https://comick.dev/api/auth/oauth2/token";
+        var ME = "https://api.comick.dev/integrations/v1/me";
+        var UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+
+        var $ = function (id) {
+          return document.getElementById(id);
+        };
         var show = function (id) {
-          document.getElementById(id).classList.remove("hidden");
+          ["start", "busy", "done", "failed"].forEach(function (name) {
+            $(name).classList.toggle("hidden", name !== id);
+          });
+        };
+        var fail = function (title, text) {
+          $("failedTitle").textContent = title;
+          $("failedText").textContent = text;
+          show("failed");
+        };
+        var restart = function () {
+          sessionStorage.removeItem("comick-verifier");
+          sessionStorage.removeItem("comick-state");
+          history.replaceState(null, "", location.pathname);
+          show("start");
         };
 
-        if (error) {
-          var text = document.getElementById("deniedText");
-          if (error !== "access_denied") {
-            text.textContent =
-              "Comick reported: " +
-              error +
-              (params.get("error_description")
-                ? " (" + params.get("error_description") + ")"
-                : "") +
-              ".";
+        function random(length) {
+          var bytes = new Uint8Array(length);
+          crypto.getRandomValues(bytes);
+          var out = "";
+          for (var i = 0; i < length; i++) {
+            out += UNRESERVED[bytes[i] % UNRESERVED.length];
           }
-          show("denied");
-          return;
+          return out;
         }
 
-        if (!code) {
-          show("empty");
-          return;
+        function base64url(buffer) {
+          var bytes = new Uint8Array(buffer);
+          var binary = "";
+          for (var i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
         }
 
-        document.getElementById("code").textContent = code;
-        document.getElementById("copy").addEventListener("click", function () {
+        function form(fields) {
+          return Object.keys(fields)
+            .map(function (key) {
+              return encodeURIComponent(key) + "=" + encodeURIComponent(fields[key]);
+            })
+            .join("&");
+        }
+
+        function begin() {
+          var verifier = random(64);
+          var state = random(24);
+          sessionStorage.setItem("comick-verifier", verifier);
+          sessionStorage.setItem("comick-state", state);
+          crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)).then(
+            function (digest) {
+              location.href =
+                AUTHORIZE +
+                "?" +
+                form({
+                  response_type: "code",
+                  client_id: CLIENT_ID,
+                  redirect_uri: REDIRECT_URI,
+                  scope: "library:read library:write offline_access",
+                  resource: RESOURCE,
+                  state: state,
+                  code_challenge: base64url(digest),
+                  code_challenge_method: "S256",
+                });
+            },
+            function (error) {
+              fail("This browser cannot sign in", String(error));
+            },
+          );
+        }
+
+        function finish(code, state) {
+          var verifier = sessionStorage.getItem("comick-verifier");
+          var expected = sessionStorage.getItem("comick-state");
+          sessionStorage.removeItem("comick-verifier");
+          sessionStorage.removeItem("comick-state");
+          history.replaceState(null, "", location.pathname);
+
+          if (!verifier || !expected) {
+            fail(
+              "Sign-in expired",
+              "This page lost track of the attempt. Start again from this page in the same browser.",
+            );
+            return;
+          }
+          if (state !== expected) {
+            fail(
+              "Sign-in mismatch",
+              "The state Comick sent back does not match this attempt. Start again.",
+            );
+            return;
+          }
+
+          show("busy");
+          var access;
+          var refresh;
+          fetch(TOKEN, {
+            method: "POST",
+            credentials: "omit",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: form({
+              grant_type: "authorization_code",
+              code: code,
+              redirect_uri: REDIRECT_URI,
+              code_verifier: verifier,
+              client_id: CLIENT_ID,
+              resource: RESOURCE,
+            }),
+          })
+            .then(function (response) {
+              return response.json().then(function (json) {
+                if (!response.ok || !json.access_token) {
+                  throw new Error(
+                    json.error_description || json.error || "HTTP " + response.status,
+                  );
+                }
+                access = json.access_token;
+                refresh = json.refresh_token;
+              });
+            })
+            .then(function () {
+              if (!refresh) {
+                throw new Error(
+                  "Comick issued no login token because offline access was not approved. Try again and keep it ticked.",
+                );
+              }
+              return fetch(ME, {
+                credentials: "omit",
+                cache: "no-store",
+                headers: { authorization: "Bearer " + access },
+              });
+            })
+            .then(function (response) {
+              return response.ok ? response.json() : { username: null };
+            })
+            .then(function (me) {
+              $("who").textContent = "Signed in as " + (me.username || "Comick user");
+              $("token").textContent = refresh;
+              show("done");
+            })
+            .catch(function (error) {
+              fail("Sign-in failed", error.message || String(error));
+            });
+        }
+
+        $("signin").addEventListener("click", begin);
+        $("retry").addEventListener("click", restart);
+        $("copy").addEventListener("click", function () {
           var button = this;
-          navigator.clipboard.writeText(code).then(
+          navigator.clipboard.writeText($("token").textContent).then(
             function () {
               button.textContent = "Copied";
             },
             function () {
-              button.textContent = "Select the code and copy it";
+              button.textContent = "Select the token and copy it";
             },
           );
         });
-        show("ok");
+
+        var params = new URLSearchParams(location.search);
+        if (params.get("error")) {
+          var description = params.get("error_description");
+          fail(
+            params.get("error") === "access_denied"
+              ? "Access was declined"
+              : "Comick reported an error",
+            params.get("error") === "access_denied"
+              ? "You did not approve Paperback on Comick. Nothing was connected."
+              : params.get("error") + (description ? ": " + description : ""),
+          );
+          sessionStorage.removeItem("comick-verifier");
+          sessionStorage.removeItem("comick-state");
+        } else if (params.get("code")) {
+          finish(params.get("code"), params.get("state") || "");
+        } else {
+          show("start");
+        }
       })();
     </script>
   </body>
