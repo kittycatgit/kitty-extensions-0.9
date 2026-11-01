@@ -8,29 +8,26 @@ import {
   Form,
   InputRow,
   LabelRow,
-  OAuthButtonRow,
   Section,
   SelectRow,
   StepperRow,
   TriStateSelectRow,
+  WebViewRow,
   type FormItemElement,
   type FormSectionElement,
 } from "@paperback/types";
 
 import {
+  beginLogin,
   clearSession,
+  completeLogin,
   currentSession,
-  fetchUsername,
   library,
   revokeSession,
-  saveSession,
   storedUsername,
   type LibraryResult,
 } from "./auth";
 import {
-  ACCESS_LIFETIME_MS,
-  AUTHORIZE_URL,
-  CLIENT_ID,
   COLLECTIONS,
   COUNTRIES,
   DEFAULT_RATING,
@@ -38,10 +35,6 @@ import {
   PUBLICATION,
   RATING_KEY,
   RATINGS,
-  REDIRECT_URI,
-  SCOPES,
-  TOKEN_URL,
-  USER_KEY,
   type ComickMetadata,
   type TriState,
 } from "./models";
@@ -63,9 +56,18 @@ export function storedRating(): string {
 export class ComickSettingsForm extends Form {
   private status = "";
 
+  private code = "";
+
+  private authorizeUrl = "";
+
   override getSections(): FormSectionElement<unknown>[] {
     const session = currentSession();
     const user = storedUsername();
+
+    // One verifier per sign-in attempt; a reload keeps the URL the webview opened.
+    if (!session && !this.authorizeUrl) {
+      this.authorizeUrl = beginLogin();
+    }
 
     return [
       Section(
@@ -76,7 +78,7 @@ export class ComickSettingsForm extends Form {
             this.status ||
             (session
               ? "Your library lists appear as collections, and chapters read in Paperback are sent back as progress."
-              : "Sign in to see your Comick lists in the Library and to sync reading progress and ratings."),
+              : "Sign in, approve Paperback, copy the code Comick shows, paste it here and tap Connect."),
         },
         session
           ? [
@@ -90,21 +92,20 @@ export class ComickSettingsForm extends Form {
               }),
             ]
           : [
-              OAuthButtonRow("login", {
-                title: "Log in with Comick",
-                subtitle: "Opens comick.dev to approve Paperback.",
-                onSuccess: Application.Selector(this as ComickSettingsForm, "loginSucceeded"),
-                authorizeEndpoint: AUTHORIZE_URL,
-                responseType: {
-                  type: "pkce",
-                  tokenEndpoint: TOKEN_URL,
-                  pkceCodeLength: 64,
-                  pkceCodeMethod: "S256",
-                  formEncodeGrant: true,
-                },
-                clientId: CLIENT_ID,
-                redirectUri: REDIRECT_URI,
-                scopes: SCOPES,
+              WebViewRow("signin", {
+                title: "Sign in to Comick",
+                request: { url: this.authorizeUrl, method: "GET" },
+                onComplete: Application.Selector(this as ComickSettingsForm, "webViewClosed"),
+                onCancel: Application.Selector(this as ComickSettingsForm, "webViewCancelled"),
+              }),
+              InputRow("code", {
+                title: "Authorization code",
+                value: this.code,
+                onValueChange: Application.Selector(this as ComickSettingsForm, "codeChanged"),
+              }),
+              ButtonRow("connect", {
+                title: "Connect",
+                onSelect: Application.Selector(this as ComickSettingsForm, "connect"),
               }),
             ],
       ),
@@ -136,37 +137,37 @@ export class ComickSettingsForm extends Form {
     ];
   }
 
-  // The app hands the two tokens over positionally; the access token is the
-  // one /me accepts, so both orders are checked once rather than guessed.
-  async loginSucceeded(first: string, second: string): Promise<void> {
-    const candidates = [
-      { accessToken: second, refreshToken: first },
-      { accessToken: first, refreshToken: second },
-    ].filter((pair) => pair.accessToken);
-    let username: string | undefined;
-    let lastError: unknown;
+  async webViewClosed(_cookies: unknown): Promise<void> {
+    // The code arrives by paste; the webview's cookies are not used.
+  }
 
-    for (const pair of candidates) {
-      const session = { ...pair, expiresAt: Date.now() + ACCESS_LIFETIME_MS };
+  async webViewCancelled(): Promise<void> {}
 
-      try {
-        username = await fetchUsername(session);
-        saveSession(session);
-        break;
-      } catch (error: unknown) {
-        lastError = error;
-      }
-    }
+  async codeChanged(value: string): Promise<void> {
+    this.code = value.trim();
+  }
 
-    if (!username) {
-      this.status = `Login failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`;
+  async connect(): Promise<void> {
+    if (!this.code) {
+      this.status = "Paste the code shown after signing in.";
       this.reloadForm();
       return;
     }
 
-    Application.setState(username, USER_KEY);
-    this.status = "";
-    Application.invalidateDiscoverSections();
+    this.status = "Connecting…";
+    this.reloadForm();
+
+    try {
+      const username = await completeLogin(this.code);
+
+      this.code = "";
+      this.authorizeUrl = "";
+      this.status = `Connected as ${username}.`;
+      Application.invalidateDiscoverSections();
+    } catch (error: unknown) {
+      this.status = error instanceof Error ? error.message : String(error);
+    }
+
     this.reloadForm();
   }
 

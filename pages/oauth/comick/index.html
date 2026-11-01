@@ -60,21 +60,16 @@
         font: inherit;
         font-weight: 600;
         text-align: center;
-        text-decoration: none;
         cursor: pointer;
-      }
-      .button.secondary {
-        background: #262a33;
-        margin-top: 10px;
       }
       code {
         display: block;
-        margin: 16px 0 10px;
-        padding: 12px;
+        margin: 16px 0 12px;
+        padding: 14px;
         border-radius: 10px;
         background: #0b0d11;
         font:
-          15px/1.4 ui-monospace,
+          20px/1.4 ui-monospace,
           SFMono-Regular,
           Menlo,
           monospace;
@@ -98,14 +93,13 @@
   <body>
     <main id="ok" class="hidden">
       <h1>Comick approved Paperback</h1>
-      <p>Paperback should open on its own. If it did not, tap the button.</p>
-      <a id="open" class="button" href="#">Return to Paperback</a>
+      <p>
+        Copy this code, close this window, then paste it into Authorization code in Paperback's
+        Comick settings and tap Connect.
+      </p>
       <code id="code"></code>
-      <button id="copy" class="button secondary" type="button">Copy code</button>
-      <small
-        >If Paperback asks for a code, paste this one. It only works once and expires in a few
-        minutes.</small
-      >
+      <button id="copy" class="button" type="button">Copy code</button>
+      <small>The code only works once and expires in a few minutes.</small>
     </main>
     <main id="denied" class="hidden error">
       <h1>Login cancelled</h1>
@@ -121,7 +115,6 @@
       (function () {
         var params = new URLSearchParams(location.search);
         var code = params.get("code");
-        var state = params.get("state") || "";
         var error = params.get("error");
         var show = function (id) {
           document.getElementById(id).classList.remove("hidden");
@@ -147,12 +140,6 @@
           return;
         }
 
-        var target =
-          "paperback://Comick-login?code=" +
-          encodeURIComponent(code) +
-          "&state=" +
-          encodeURIComponent(state);
-        document.getElementById("open").setAttribute("href", target);
         document.getElementById("code").textContent = code;
         document.getElementById("copy").addEventListener("click", function () {
           var button = this;
@@ -166,7 +153,6 @@
           );
         });
         show("ok");
-        location.replace(target);
       })();
     </script>
   </body>

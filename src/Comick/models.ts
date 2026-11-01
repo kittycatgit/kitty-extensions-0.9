@@ -17,17 +17,13 @@ export const RESOURCE = `${LIBRARY}`;
 export const SCOPES = ["library:read", "library:write", "offline_access"];
 export const TOKEN_URL = `${DOMAIN}/api/auth/oauth2/token`;
 export const REVOKE_URL = `${DOMAIN}/api/auth/oauth2/revoke`;
-export const AUTHORIZE_URL =
-  `${DOMAIN}/api/auth/oauth2/authorize?response_type=code` +
-  `&client_id=${CLIENT_ID}` +
-  `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
-  `&scope=${encodeURIComponent(SCOPES.join(" "))}` +
-  `&resource=${encodeURIComponent(RESOURCE)}` +
-  `&state=paperback&code_challenge_method=S256`;
+export const AUTHORIZE_URL = `${DOMAIN}/api/auth/oauth2/authorize`;
 
 export const SESSION_KEY = "comick-session";
 export const USER_KEY = "comick-user";
 export const RATING_KEY = "comick-rating";
+export const VERIFIER_KEY = "comick-pkce-verifier";
+export const STATE_KEY = "comick-pkce-state";
 
 // Comick issues 15 minute access tokens; refresh a little early.
 export const ACCESS_LIFETIME_MS = 14 * 60 * 1000;

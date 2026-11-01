@@ -1,15 +1,21 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright © 2026 kittycatgit */
 
+import { pkceChallenge, randomToken } from "./crypto";
 import {
   ACCESS_LIFETIME_MS,
+  AUTHORIZE_URL,
   CLIENT_ID,
   LIBRARY,
+  REDIRECT_URI,
   RESOURCE,
   REVOKE_URL,
+  SCOPES,
   SESSION_KEY,
+  STATE_KEY,
   TOKEN_URL,
   USER_KEY,
+  VERIFIER_KEY,
   type Session,
 } from "./models";
 
@@ -68,6 +74,92 @@ function form(fields: Record<string, string>): string {
     .join("&");
 }
 
+async function tokenRequest(
+  fields: Record<string, string>,
+): Promise<TokenResponse & { status: number; text: string }> {
+  const [response, buffer] = await Application.scheduleRequest({
+    url: TOKEN_URL,
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: form(fields),
+  });
+  const text = Application.arrayBufferToUTF8String(buffer);
+
+  try {
+    return { ...(JSON.parse(text) as TokenResponse), status: response.status, text };
+  } catch {
+    throw new SessionError(
+      `Comick token endpoint returned ${response.status}: ${text.slice(0, 120)}`,
+    );
+  }
+}
+
+// Comick wants the PKCE verifier and state kept across the sign-in, and the
+// app's own OAuth row cannot send the resource parameter, so the flow is ours.
+export function beginLogin(): string {
+  const verifier = randomToken(64);
+  const state = randomToken(24);
+
+  Application.setState(verifier, VERIFIER_KEY);
+  Application.setState(state, STATE_KEY);
+
+  const params: Record<string, string> = {
+    response_type: "code",
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    scope: SCOPES.join(" "),
+    resource: RESOURCE,
+    state,
+    code_challenge: pkceChallenge(verifier),
+    code_challenge_method: "S256",
+  };
+
+  return `${AUTHORIZE_URL}?${form(params)}`;
+}
+
+export async function completeLogin(code: string): Promise<string> {
+  const verifier = Application.getState(VERIFIER_KEY);
+
+  if (typeof verifier !== "string" || !verifier) {
+    throw new SessionError("Open Sign in to Comick first, then paste the code it shows.");
+  }
+
+  const json = await tokenRequest({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: REDIRECT_URI,
+    code_verifier: verifier,
+    client_id: CLIENT_ID,
+    resource: RESOURCE,
+  });
+
+  if (json.status !== 200 || !json.access_token) {
+    throw new SessionError(
+      `Comick refused the code: ${json.error_description ?? json.error ?? json.text.slice(0, 120)}`,
+    );
+  }
+
+  if (!json.refresh_token) {
+    throw new SessionError(
+      "Comick issued no refresh token; approve offline access when signing in.",
+    );
+  }
+
+  const session = sessionFrom(
+    json,
+    { accessToken: "", refreshToken: json.refresh_token, expiresAt: 0 },
+    Date.now(),
+  );
+  const username = await fetchUsername(session);
+
+  saveSession(session);
+  Application.setState(username, USER_KEY);
+  Application.setState(undefined, VERIFIER_KEY);
+  Application.setState(undefined, STATE_KEY);
+
+  return username;
+}
+
 let refreshing: Promise<Session> | undefined;
 
 // Refreshes are serialised and never retried: Comick revokes the whole token
@@ -75,36 +167,21 @@ let refreshing: Promise<Session> | undefined;
 export function refreshSession(session: Session): Promise<Session> {
   if (!refreshing) {
     refreshing = (async () => {
-      const [response, buffer] = await Application.scheduleRequest({
-        url: TOKEN_URL,
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: form({
-          grant_type: "refresh_token",
-          client_id: CLIENT_ID,
-          refresh_token: session.refreshToken,
-          resource: RESOURCE,
-        }),
+      const json = await tokenRequest({
+        grant_type: "refresh_token",
+        client_id: CLIENT_ID,
+        refresh_token: session.refreshToken,
+        resource: RESOURCE,
       });
-      const text = Application.arrayBufferToUTF8String(buffer);
-      let json: TokenResponse = {};
 
-      try {
-        json = JSON.parse(text) as TokenResponse;
-      } catch {
-        throw new SessionError(
-          `Comick token refresh returned ${response.status}: ${text.slice(0, 120)}`,
-        );
-      }
-
-      if (response.status === 400 || response.status === 401) {
+      if (json.status === 400 || json.status === 401) {
         clearSession();
         throw new SessionError("Comick session expired, log in again in settings");
       }
 
-      if (response.status !== 200) {
+      if (json.status !== 200) {
         throw new SessionError(
-          `Comick token refresh failed (${response.status}): ${json.error_description ?? json.error ?? text.slice(0, 120)}`,
+          `Comick token refresh failed (${json.status}): ${json.error_description ?? json.error ?? json.text.slice(0, 120)}`,
         );
       }
 
