@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Comick login</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0f1115;
+        --card: #181b22;
+        --text: #f2f3f5;
+        --muted: #9aa1ad;
+        --accent: #3b82f6;
+        --danger: #ef4444;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          16px/1.5 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+      }
+      main {
+        width: 100%;
+        max-width: 420px;
+        background: var(--card);
+        border-radius: 16px;
+        padding: 24px;
+      }
+      h1 {
+        font-size: 1.25rem;
+        margin: 0 0 8px;
+      }
+      p {
+        margin: 0 0 16px;
+        color: var(--muted);
+      }
+      .button {
+        display: block;
+        width: 100%;
+        padding: 14px;
+        border: 0;
+        border-radius: 12px;
+        background: var(--accent);
+        color: #fff;
+        font: inherit;
+        font-weight: 600;
+        text-align: center;
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .button.secondary {
+        background: #262a33;
+        margin-top: 10px;
+      }
+      code {
+        display: block;
+        margin: 16px 0 10px;
+        padding: 12px;
+        border-radius: 10px;
+        background: #0b0d11;
+        font:
+          15px/1.4 ui-monospace,
+          SFMono-Regular,
+          Menlo,
+          monospace;
+        word-break: break-all;
+        user-select: all;
+        -webkit-user-select: all;
+      }
+      .error h1 {
+        color: var(--danger);
+      }
+      .hidden {
+        display: none;
+      }
+      small {
+        display: block;
+        margin-top: 12px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main id="ok" class="hidden">
+      <h1>Comick approved Paperback</h1>
+      <p>Paperback should open on its own. If it did not, tap the button.</p>
+      <a id="open" class="button" href="#">Return to Paperback</a>
+      <code id="code"></code>
+      <button id="copy" class="button secondary" type="button">Copy code</button>
+      <small
+        >If Paperback asks for a code, paste this one. It only works once and expires in a few
+        minutes.</small
+      >
+    </main>
+    <main id="denied" class="hidden error">
+      <h1>Login cancelled</h1>
+      <p id="deniedText">
+        Comick did not grant Paperback access. Go back to the app and try again.
+      </p>
+    </main>
+    <main id="empty" class="hidden error">
+      <h1>Nothing to do here</h1>
+      <p>This page only completes a Comick login started from Paperback.</p>
+    </main>
+    <script>
+      (function () {
+        var params = new URLSearchParams(location.search);
+        var code = params.get("code");
+        var state = params.get("state") || "";
+        var error = params.get("error");
+        var show = function (id) {
+          document.getElementById(id).classList.remove("hidden");
+        };
+
+        if (error) {
+          var text = document.getElementById("deniedText");
+          if (error !== "access_denied") {
+            text.textContent =
+              "Comick reported: " +
+              error +
+              (params.get("error_description")
+                ? " (" + params.get("error_description") + ")"
+                : "") +
+              ".";
+          }
+          show("denied");
+          return;
+        }
+
+        if (!code) {
+          show("empty");
+          return;
+        }
+
+        var target =
+          "paperback://Comick-login?code=" +
+          encodeURIComponent(code) +
+          "&state=" +
+          encodeURIComponent(state);
+        document.getElementById("open").setAttribute("href", target);
+        document.getElementById("code").textContent = code;
+        document.getElementById("copy").addEventListener("click", function () {
+          var button = this;
+          navigator.clipboard.writeText(code).then(
+            function () {
+              button.textContent = "Copied";
+            },
+            function () {
+              button.textContent = "Select the code and copy it";
+            },
+          );
+        });
+        show("ok");
+        location.replace(target);
+      })();
+    </script>
+  </body>
+</html>
