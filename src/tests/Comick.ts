@@ -8,8 +8,7 @@ import {
 } from "@paperback/types";
 import { expect } from "chai";
 
-import { sessionFrom } from "../Comick/auth.js";
-import { pkceChallenge, randomToken } from "../Comick/crypto.js";
+import { parseLoginCode, sessionFrom } from "../Comick/auth.js";
 import { Comick } from "../Comick/main.js";
 import { parseLibraryRow, plainText } from "../Comick/parsers.js";
 import sourceInfo from "../Comick/pbconfig.js";
@@ -298,13 +297,18 @@ export async function runTests(logger: TestLogger) {
     expect(() => sessionFrom({ error: "invalid_grant" }, previous, 0)).to.throw("invalid_grant");
   });
 
-  suite.test("PKCE challenge matches RFC 7636", async () => {
-    expect(pkceChallenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")).to.equal(
-      "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
-    );
-    const verifier = randomToken(64);
-    expect(verifier).to.match(/^[A-Za-z0-9\-._~]{64}$/);
-    expect(randomToken(64)).to.not.equal(verifier);
+  suite.test("login codes unpack into code and verifier", async () => {
+    const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+    const packed = Application.base64Encode(`abc.DEF-123.${verifier}`);
+    expect(packed).to.be.a("string");
+    const loginCode = (packed as string).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    expect(parseLoginCode(` ${loginCode} `)).to.deep.equal({
+      code: "abc",
+      verifier: `DEF-123.${verifier}`,
+    });
+    expect(parseLoginCode("not a code")).to.be.undefined;
+    expect(parseLoginCode("")).to.be.undefined;
+    expect(parseLoginCode(Application.base64Encode("noverifier") as string)).to.be.undefined;
   });
 
   suite.test("markdown synopses become plain text", async () => {

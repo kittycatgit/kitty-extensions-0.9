@@ -22,12 +22,12 @@ import {
   currentSession,
   library,
   revokeSession,
-  signInLink,
   storedUsername,
   type LibraryResult,
 } from "./auth";
 import {
   COLLECTIONS,
+  REDIRECT_URI,
   COUNTRIES,
   DEFAULT_RATING,
   DEMOGRAPHICS,
@@ -53,7 +53,7 @@ export function storedRating(): string {
 }
 
 export class ComickSettingsForm extends Form {
-  private status = "";
+  private status = "Not connected";
 
   private code = "";
 
@@ -66,11 +66,9 @@ export class ComickSettingsForm extends Form {
         {
           id: "account",
           header: "Comick account",
-          footer:
-            this.status ||
-            (session
-              ? "Your library lists appear as collections, and chapters read in Paperback are sent back as progress."
-              : "The link is yours alone and stays valid until a code is used."),
+          footer: session
+            ? "Your library lists appear as collections, and chapters read in Paperback are sent back as progress."
+            : "The login code is single-use; the sign-in page makes a new one each time.",
         },
         session
           ? [
@@ -84,18 +82,13 @@ export class ComickSettingsForm extends Form {
               }),
             ]
           : [
-              InputRow("link", {
-                title: "Sign-in link",
-                value: signInLink(),
-                onValueChange: Application.Selector(this as ComickSettingsForm, "linkEdited"),
+              LabelRow("how", {
+                title: "Sign in",
+                subtitle: `Open ${REDIRECT_URI.replace("https://", "")} in Safari, sign in to Comick, then paste the login code it shows below.`,
               }),
-              LabelRow("steps", {
-                title: "How to connect",
-                subtitle:
-                  "1. Tap the link above, select all, copy. 2. Paste it in Safari and sign in to Comick. 3. Copy the code it shows and paste it below.",
-              }),
+              LabelRow("status", { title: "Status", subtitle: this.status }),
               InputRow("code", {
-                title: "Code",
+                title: "Login code",
                 value: this.code,
                 onValueChange: Application.Selector(this as ComickSettingsForm, "codeChanged"),
               }),
@@ -133,18 +126,14 @@ export class ComickSettingsForm extends Form {
     ];
   }
 
-  // The link is read-only; typing in it would only desync it from the verifier.
-  async linkEdited(_value: string): Promise<void> {
-    this.reloadForm();
-  }
-
   async codeChanged(value: string): Promise<void> {
     this.code = value.trim();
   }
 
+  // Every branch lands in the status row; nothing escapes the selector.
   async connect(): Promise<void> {
     if (!this.code) {
-      this.status = "Paste the code from the sign-in page.";
+      this.status = "Paste the login code from the sign-in page.";
       this.reloadForm();
       return;
     }
@@ -167,6 +156,8 @@ export class ComickSettingsForm extends Form {
 
   async logOut(): Promise<void> {
     const session = currentSession();
+
+    this.status = "Not connected";
 
     if (session) {
       try {

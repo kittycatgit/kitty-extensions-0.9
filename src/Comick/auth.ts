@@ -1,22 +1,16 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright © 2026 kittycatgit */
 
-import { pkceChallenge, randomToken } from "./crypto";
 import {
   ACCESS_LIFETIME_MS,
-  AUTHORIZE_URL,
   CLIENT_ID,
   LIBRARY,
-  LINK_KEY,
   REDIRECT_URI,
   RESOURCE,
   REVOKE_URL,
-  SCOPES,
   SESSION_KEY,
-  STATE_KEY,
   TOKEN_URL,
   USER_KEY,
-  VERIFIER_KEY,
   type Session,
 } from "./models";
 
@@ -97,72 +91,57 @@ async function tokenRequest(
 
 // The sign-in page hands over a refresh token; the first refresh grant turns
 // it into a session and rotates it, so a pasted token only works once.
-// One PKCE attempt lives across settings opens until a code is exchanged:
-// the link the user copies must match the verifier the exchange sends.
-export function signInLink(): string {
-  const stored = Application.getState(LINK_KEY);
+export type LoginCode = { code: string; verifier: string };
 
-  if (typeof stored === "string" && stored && Application.getState(VERIFIER_KEY)) {
-    return stored;
+// The sign-in page packs `${code}.${verifier}` as base64url so one paste
+// carries both halves of the PKCE exchange.
+export function parseLoginCode(loginCode: string): LoginCode | undefined {
+  const packed = loginCode.trim().replace(/-/g, "+").replace(/_/g, "/");
+
+  if (!packed || !/^[A-Za-z0-9+/]+$/.test(packed)) {
+    return undefined;
   }
 
-  return freshSignInLink();
+  const decoded = Application.base64Decode(packed + "=".repeat((4 - (packed.length % 4)) % 4));
+  const text = typeof decoded === "string" ? decoded : Application.arrayBufferToUTF8String(decoded);
+  const dot = text.indexOf(".");
+  const code = dot > 0 ? text.slice(0, dot) : "";
+  const verifier = dot > 0 ? text.slice(dot + 1) : "";
+
+  if (!code || !/^[A-Za-z0-9\-._~]{43,128}$/.test(verifier) || /[^\x21-\x7e]/.test(code)) {
+    return undefined;
+  }
+
+  return { code, verifier };
 }
 
-function freshSignInLink(): string {
-  const verifier = randomToken(64);
-  const state = randomToken(24);
-  const link = `${AUTHORIZE_URL}?${form({
-    response_type: "code",
-    client_id: CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
-    scope: SCOPES.join(" "),
-    resource: RESOURCE,
-    state,
-    code_challenge: pkceChallenge(verifier),
-    code_challenge_method: "S256",
-  })}`;
+export async function completeLogin(loginCode: string): Promise<string> {
+  const parsed = parseLoginCode(loginCode);
 
-  Application.setState(verifier, VERIFIER_KEY);
-  Application.setState(state, STATE_KEY);
-  Application.setState(link, LINK_KEY);
-
-  return link;
-}
-
-function clearSignInLink(): void {
-  Application.setState(undefined, VERIFIER_KEY);
-  Application.setState(undefined, STATE_KEY);
-  Application.setState(undefined, LINK_KEY);
-}
-
-export async function completeLogin(code: string): Promise<string> {
-  const verifier = Application.getState(VERIFIER_KEY);
-
-  if (typeof verifier !== "string" || !verifier) {
-    freshSignInLink();
-    throw new SessionError("Copy the sign-in link first, sign in, then paste the code it shows.");
+  if (!parsed) {
+    throw new SessionError("That is not a Comick login code. Copy it from the sign-in page.");
   }
 
   const json = await tokenRequest({
     grant_type: "authorization_code",
-    code,
+    code: parsed.code,
     redirect_uri: REDIRECT_URI,
-    code_verifier: verifier,
+    code_verifier: parsed.verifier,
     client_id: CLIENT_ID,
     resource: RESOURCE,
   });
 
-  if (json.error === "invalid_grant") {
-    freshSignInLink();
-    throw new SessionError(
-      "This code was already used or expired. Copy the new sign-in link and try again.",
-    );
-  }
-
   if (json.status !== 200 || !json.access_token) {
+    console.log(`Comick token exchange ${json.status}: ${json.text.slice(0, 200)}`);
+
+    if (json.error === "invalid_grant") {
+      throw new SessionError(
+        "This login code was already used or expired. Open the sign-in page again for a new one.",
+      );
+    }
+
     throw new SessionError(
-      `Comick refused the code: ${json.error_description ?? json.error ?? json.text.slice(0, 120)}`,
+      `Comick refused the login code: ${json.error_description ?? json.error ?? json.text.slice(0, 120)}`,
     );
   }
 
@@ -181,7 +160,6 @@ export async function completeLogin(code: string): Promise<string> {
 
   saveSession(session);
   Application.setState(username, USER_KEY);
-  clearSignInLink();
 
   return username;
 }
