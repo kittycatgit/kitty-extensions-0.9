@@ -8,7 +8,7 @@ import {
 } from "@paperback/types";
 import { expect } from "chai";
 
-import { parseLoginCode, sessionFrom } from "../Comick/auth.js";
+import { canWrite, parseLoginCode, sessionFrom } from "../Comick/auth.js";
 import { Comick } from "../Comick/main.js";
 import { parseLibraryRow, plainText } from "../Comick/parsers.js";
 import sourceInfo from "../Comick/pbconfig.js";
@@ -291,6 +291,15 @@ export async function runTests(logger: TestLogger) {
       refreshToken: "new-r",
       expiresAt: 1_000 + 14 * 60 * 1000,
     });
+    const granted = sessionFrom(
+      { access_token: "a", scope: "library:read library:write offline_access" },
+      previous,
+      0,
+    );
+    expect(canWrite(granted)).to.be.true;
+    expect(canWrite(sessionFrom({ access_token: "a", scope: "library:read" }, previous, 0))).to.be
+      .false;
+    expect(canWrite(sessionFrom({ access_token: "b" }, granted, 0))).to.be.true;
     const kept = sessionFrom({ access_token: "new-a", expires_in: 60 }, previous, 0);
     expect(kept.refreshToken).to.equal("old-r");
     expect(kept.expiresAt).to.equal(60_000);

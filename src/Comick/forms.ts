@@ -17,16 +17,19 @@ import {
 } from "@paperback/types";
 
 import {
+  canWrite,
   clearSession,
   completeLogin,
   currentSession,
   library,
+  requireWrite,
   revokeSession,
   storedUsername,
   type LibraryResult,
 } from "./auth";
 import {
   COLLECTIONS,
+  READ_ONLY,
   REDIRECT_URI,
   COUNTRIES,
   DEFAULT_RATING,
@@ -76,6 +79,10 @@ export class ComickSettingsForm extends Form {
                 title: "Signed in as",
                 value: user ?? "Comick user",
               }),
+              LabelRow("permissions", {
+                title: "Permissions",
+                subtitle: canWrite(session) ? "Read and write" : READ_ONLY,
+              }),
               ButtonRow("logout", {
                 title: "Log out",
                 onSelect: Application.Selector(this as ComickSettingsForm, "logOut"),
@@ -84,7 +91,7 @@ export class ComickSettingsForm extends Form {
           : [
               LabelRow("how", {
                 title: "Sign in",
-                subtitle: `Open ${REDIRECT_URI.replace("https://", "")} in Safari, sign in to Comick, then paste the login code it shows below.`,
+                subtitle: `1. In Safari, sign in at comick.dev first. 2. Then open ${REDIRECT_URI.replace("https://", "")} and approve Paperback. 3. Paste the login code it shows below.`,
               }),
               LabelRow("status", { title: "Status", subtitle: this.status }),
               InputRow("code", {
@@ -459,6 +466,8 @@ export class ComickProgressForm extends Form {
   }
 
   override async formDidSubmit(): Promise<void> {
+    requireWrite();
+
     if (this.chapter && !/^\d+(\.\d+)?$/.test(this.chapter)) {
       throw new Error("The chapter must be a number such as 12 or 12.5.");
     }

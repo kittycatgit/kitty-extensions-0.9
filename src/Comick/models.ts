@@ -34,7 +34,11 @@ export type Session = {
   accessToken: string;
   refreshToken: string;
   expiresAt: number;
+  scope?: string;
 };
+
+export const READ_ONLY =
+  "Read only. Log out and sign in again, allowing library changes, to add or remove titles.";
 
 export type TriState = Record<string, "included" | "excluded">;
 

@@ -22,7 +22,7 @@ import {
   type TrackedMangaChapterReadAction,
 } from "@paperback/types";
 
-import { currentSession, library, SessionError } from "./auth";
+import { currentSession, library, requireWrite, SessionError } from "./auth";
 import { ComickProgressForm, ComickSearchForm, ComickSettingsForm, storedRating } from "./forms";
 import {
   API,
@@ -403,9 +403,7 @@ class ComickExtension implements ExtensionImpl<typeof pbconfig> {
   }
 
   async commitManagedCollectionChanges(changeset: ManagedCollectionChangeset): Promise<void> {
-    if (!currentSession()) {
-      throw new SessionError("You need to be logged in");
-    }
+    requireWrite();
 
     const status = Number(changeset.collection.id);
     const entry = (hid: string): string => `/me/library/${encodeURIComponent(hid)}`;

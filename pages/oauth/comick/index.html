@@ -101,7 +101,7 @@
   <body>
     <main id="start" class="hidden">
       <h1>Opening Comick sign-in…</h1>
-      <p>Sign in on comick.dev and approve Paperback, including offline access.</p>
+      <p>Sign in at comick.dev in this browser first, then open this page again.</p>
     </main>
     <main id="done" class="hidden ok">
       <h1>Comick approved Paperback</h1>
@@ -120,7 +120,10 @@
     </main>
     <main id="empty" class="hidden error">
       <h1>This browser cannot sign in</h1>
-      <p id="emptyText">It is missing the crypto features the sign-in needs. Try Safari.</p>
+      <p id="emptyText">
+        It is missing the crypto features the sign-in needs. Sign in at comick.dev in Safari first,
+        then open this page again there.
+      </p>
     </main>
     <script>
       (function () {
@@ -249,12 +252,15 @@
           if (!verifier || !expected) {
             fail(
               "Sign-in expired",
-              "This page lost track of the attempt. Start over in the same browser.",
+              "Sign in at comick.dev in this browser first, then open this page again.",
             );
             return;
           }
           if (state !== expected) {
-            fail("Sign-in mismatch", "Comick sent back a different attempt. Start over.");
+            fail(
+              "Sign-in mismatch",
+              "Sign in at comick.dev in this browser first, then open this page again.",
+            );
             return;
           }
 
@@ -286,7 +292,7 @@
               ? "Access was declined"
               : "Comick reported an error",
             params.get("error") === "access_denied"
-              ? "You did not approve Paperback on Comick. Nothing was connected."
+              ? "Paperback was not approved. Sign in at comick.dev in this browser first, then open this page again."
               : params.get("error") + (description ? ": " + description : ""),
           );
         } else if (params.get("code")) {

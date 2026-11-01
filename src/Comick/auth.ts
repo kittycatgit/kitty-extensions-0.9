@@ -5,6 +5,7 @@ import {
   ACCESS_LIFETIME_MS,
   CLIENT_ID,
   LIBRARY,
+  READ_ONLY,
   REDIRECT_URI,
   RESOURCE,
   REVOKE_URL,
@@ -20,6 +21,7 @@ export type TokenResponse = {
   access_token?: string;
   refresh_token?: string;
   expires_in?: number;
+  scope?: string;
   error?: string;
   error_description?: string;
 };
@@ -60,7 +62,23 @@ export function sessionFrom(json: TokenResponse, previous: Session, now: number)
     accessToken: json.access_token,
     refreshToken: json.refresh_token ?? previous.refreshToken,
     expiresAt: now + (lifetime || ACCESS_LIFETIME_MS),
+    // Writes need library:write; the server states what it actually granted.
+    ...((json.scope ?? previous.scope) ? { scope: json.scope ?? previous.scope } : {}),
   };
+}
+
+export function canWrite(session: Session | undefined = currentSession()): boolean {
+  return (session?.scope ?? "").split(/\s+/).includes("library:write");
+}
+
+export function requireWrite(): void {
+  if (!currentSession()) {
+    throw new SessionError("You need to be logged in");
+  }
+
+  if (!canWrite()) {
+    throw new SessionError(READ_ONLY);
+  }
 }
 
 function form(fields: Record<string, string>): string {
