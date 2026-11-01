@@ -10,7 +10,7 @@
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "conformance": "npm run tsc && npm run lint:check && npm run format:check",
-    "bundle": "paperback-cli bundle",
+    "bundle": "paperback-cli bundle && cp -R pages/. bundles/",
     "serve": "paperback-cli serve",
     "dev": "paperback-cli serve --watch",
     "logcat": "paperback-cli logcat",
