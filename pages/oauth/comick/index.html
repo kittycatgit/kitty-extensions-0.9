@@ -69,6 +69,13 @@
         margin-top: 10px;
         background: #262a33;
       }
+      .button .sub {
+        display: block;
+        margin-top: 2px;
+        font-size: 0.85rem;
+        font-weight: 400;
+        color: var(--muted);
+      }
       code {
         display: block;
         margin: 16px 0 12px;
@@ -108,6 +115,26 @@
       <h1>Opening Comick sign-in…</h1>
       <p>Sign in on comick.dev and approve Paperback, including offline access.</p>
     </main>
+    <main id="choose" class="hidden">
+      <h1>Sign in to Comick</h1>
+      <p>How do you sign in to Comick?</p>
+      <button id="here" class="button" type="button">
+        Continue here
+        <span class="sub">Email and password sign-in</span>
+      </button>
+      <a
+        id="safari"
+        class="button secondary"
+        href="x-safari-https://kittycatgit.github.io/kitty-extensions-0.9/oauth/comick/"
+      >
+        Open in Safari
+        <span class="sub">Needed for Google, Apple or passkey sign-in</span>
+      </a>
+      <small
+        >If nothing opens, type kittycatgit.github.io/kitty-extensions-0.9/oauth/comick/ into
+        Safari.</small
+      >
+    </main>
     <main id="busy" class="hidden">
       <h1>Finishing sign-in…</h1>
       <p>Asking Comick for your login token.</p>
@@ -145,7 +172,7 @@
           return document.getElementById(id);
         };
         var show = function (id) {
-          ["start", "busy", "done", "failed"].forEach(function (name) {
+          ["start", "choose", "busy", "done", "failed"].forEach(function (name) {
             $(name).classList.toggle("hidden", name !== id);
           });
         };
@@ -298,6 +325,10 @@
         }
 
         $("retry").addEventListener("click", restart);
+        $("here").addEventListener("click", function () {
+          show("start");
+          begin();
+        });
         $("startover").addEventListener("click", restart);
         $("copy").addEventListener("click", function () {
           var button = this;
@@ -326,9 +357,13 @@
           sessionStorage.removeItem("comick-state");
         } else if (params.get("code")) {
           finish(params.get("code"), params.get("state") || "");
-        } else {
+        } else if (/Safari\//.test(navigator.userAgent)) {
           show("start");
           begin();
+        } else {
+          // WKWebView omits "Safari/" from its user agent; Google and passkey
+          // sign-in need the real browser.
+          show("choose");
         }
       })();
     </script>

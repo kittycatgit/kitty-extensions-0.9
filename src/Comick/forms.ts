@@ -103,8 +103,8 @@ export class ComickSettingsForm extends Form {
                 onSelect: Application.Selector(this as ComickSettingsForm, "connect"),
               }),
               LabelRow("safari", {
-                title: "Prefer Safari?",
-                subtitle: `Open ${LOGIN_PAGE.replace("https://", "")} there and paste the token above.`,
+                title: "Google, Apple or passkey sign-in needs Safari",
+                subtitle: `Open ${LOGIN_PAGE.replace("https://", "")} there, then paste the token above.`,
               }),
             ],
       ),

@@ -7,7 +7,7 @@ import { ContentRating, SourceIntents } from "@paperback/types";
 export default {
   name: "Comick",
   description: "Comick tracker: library lists, reading progress and ratings for comick.dev.",
-  version: "5.0.0",
+  version: "6.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.ADULT,
