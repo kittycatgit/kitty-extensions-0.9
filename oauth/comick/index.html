@@ -71,7 +71,7 @@
         border-radius: 10px;
         background: #0b0d11;
         font:
-          22px/1.4 ui-monospace,
+          15px/1.4 ui-monospace,
           SFMono-Regular,
           Menlo,
           monospace;
@@ -93,62 +93,207 @@
         margin-top: 12px;
         color: var(--muted);
       }
+      a {
+        color: var(--accent);
+      }
     </style>
   </head>
   <body>
+    <main id="start" class="hidden">
+      <h1>Opening Comick sign-in…</h1>
+      <p>Sign in on comick.dev and approve Paperback, including offline access.</p>
+    </main>
     <main id="done" class="hidden ok">
       <h1>Comick approved Paperback</h1>
-      <p>Copy this code, go back to Paperback, paste it into Code and tap Connect.</p>
+      <p>
+        Copy this login code, go back to Paperback, paste it into Login code and tap Connect. It
+        works once and expires in a few minutes.
+      </p>
       <code id="code"></code>
-      <button id="copy" class="button" type="button">Copy code</button>
-      <small>The code works once and expires in a few minutes.</small>
+      <button id="copy" class="button" type="button">Copy login code</button>
+      <small><a id="startover" href="#">Start over</a></small>
     </main>
-    <main id="denied" class="hidden error">
-      <h1 id="deniedTitle">Access was declined</h1>
-      <p id="deniedText">You did not approve Paperback on Comick. Nothing was connected.</p>
+    <main id="failed" class="hidden error">
+      <h1 id="failedTitle">Sign-in failed</h1>
+      <p id="failedText"></p>
+      <button id="retry" class="button" type="button">Start over</button>
     </main>
     <main id="empty" class="hidden error">
-      <h1>Nothing to do here</h1>
-      <p>This page only completes a Comick sign-in started from Paperback's Comick settings.</p>
+      <h1>This browser cannot sign in</h1>
+      <p id="emptyText">It is missing the crypto features the sign-in needs. Try Safari.</p>
     </main>
     <script>
       (function () {
-        var params = new URLSearchParams(location.search);
-        var code = params.get("code");
-        var error = params.get("error");
+        var CLIENT_ID = "NYkivlMXotQixhHCmArAhyyrAEmiqHYu";
+        var REDIRECT_URI = "https://kittycatgit.github.io/kitty-extensions-0.9/oauth/comick/";
+        var RESOURCE = "https://api.comick.dev/integrations/v1";
+        var AUTHORIZE = "https://comick.dev/api/auth/oauth2/authorize";
+        var UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+        var KEYS = { verifier: "comick-verifier", state: "comick-state" };
+
+        var $ = function (id) {
+          return document.getElementById(id);
+        };
         var show = function (id) {
-          document.getElementById(id).classList.remove("hidden");
+          ["start", "done", "failed", "empty"].forEach(function (name) {
+            $(name).classList.toggle("hidden", name !== id);
+          });
+        };
+        var fail = function (title, text) {
+          $("failedTitle").textContent = title;
+          $("failedText").textContent = text;
+          show("failed");
+        };
+        // Safari can drop sessionStorage across the redirect, so both stores
+        // hold the attempt and both are cleared with it.
+        var stores = [sessionStorage, localStorage];
+        var remember = function (key, value) {
+          stores.forEach(function (store) {
+            try {
+              store.setItem(key, value);
+            } catch (e) {}
+          });
+        };
+        var recall = function (key) {
+          for (var i = 0; i < stores.length; i++) {
+            try {
+              var value = stores[i].getItem(key);
+              if (value) {
+                return value;
+              }
+            } catch (e) {}
+          }
+          return null;
+        };
+        var forget = function () {
+          stores.forEach(function (store) {
+            try {
+              store.removeItem(KEYS.verifier);
+              store.removeItem(KEYS.state);
+            } catch (e) {}
+          });
+        };
+        var restart = function (event) {
+          if (event) {
+            event.preventDefault();
+          }
+          forget();
+          location.replace(location.pathname);
         };
 
-        if (error) {
-          if (error !== "access_denied") {
-            var description = params.get("error_description");
-            document.getElementById("deniedTitle").textContent = "Comick reported an error";
-            document.getElementById("deniedText").textContent =
-              error + (description ? ": " + description : "");
+        function random(length) {
+          var bytes = new Uint8Array(length);
+          crypto.getRandomValues(bytes);
+          var out = "";
+          for (var i = 0; i < length; i++) {
+            out += UNRESERVED[bytes[i] % UNRESERVED.length];
           }
-          show("denied");
-          return;
+          return out;
         }
 
-        if (!code) {
-          show("empty");
-          return;
+        function base64url(bytes) {
+          var binary = "";
+          for (var i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
         }
 
-        document.getElementById("code").textContent = code;
-        document.getElementById("copy").addEventListener("click", function () {
-          var button = this;
-          navigator.clipboard.writeText(code).then(
-            function () {
-              button.textContent = "Copied";
+        function form(fields) {
+          return Object.keys(fields)
+            .map(function (key) {
+              return encodeURIComponent(key) + "=" + encodeURIComponent(fields[key]);
+            })
+            .join("&");
+        }
+
+        function begin() {
+          if (!window.crypto || !crypto.subtle || !crypto.getRandomValues) {
+            show("empty");
+            return;
+          }
+          var verifier = random(64);
+          var state = random(24);
+          remember(KEYS.verifier, verifier);
+          remember(KEYS.state, state);
+          show("start");
+          crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)).then(
+            function (digest) {
+              location.replace(
+                AUTHORIZE +
+                  "?" +
+                  form({
+                    response_type: "code",
+                    client_id: CLIENT_ID,
+                    redirect_uri: REDIRECT_URI,
+                    scope: "library:read library:write offline_access",
+                    resource: RESOURCE,
+                    state: state,
+                    code_challenge: base64url(new Uint8Array(digest)),
+                    code_challenge_method: "S256",
+                  }),
+              );
             },
-            function () {
-              button.textContent = "Select the code and copy it";
+            function (error) {
+              fail("This browser cannot sign in", String(error));
             },
           );
-        });
-        show("done");
+        }
+
+        function finish(code, state) {
+          var verifier = recall(KEYS.verifier);
+          var expected = recall(KEYS.state);
+          forget();
+          history.replaceState(null, "", location.pathname);
+
+          if (!verifier || !expected) {
+            fail(
+              "Sign-in expired",
+              "This page lost track of the attempt. Start over in the same browser.",
+            );
+            return;
+          }
+          if (state !== expected) {
+            fail("Sign-in mismatch", "Comick sent back a different attempt. Start over.");
+            return;
+          }
+
+          var loginCode = base64url(new TextEncoder().encode(code + "." + verifier));
+          $("code").textContent = loginCode;
+          $("copy").addEventListener("click", function () {
+            var button = this;
+            navigator.clipboard.writeText(loginCode).then(
+              function () {
+                button.textContent = "Copied";
+              },
+              function () {
+                button.textContent = "Select the code and copy it";
+              },
+            );
+          });
+          show("done");
+        }
+
+        $("retry").addEventListener("click", restart);
+        $("startover").addEventListener("click", restart);
+
+        var params = new URLSearchParams(location.search);
+        if (params.get("error")) {
+          forget();
+          var description = params.get("error_description");
+          fail(
+            params.get("error") === "access_denied"
+              ? "Access was declined"
+              : "Comick reported an error",
+            params.get("error") === "access_denied"
+              ? "You did not approve Paperback on Comick. Nothing was connected."
+              : params.get("error") + (description ? ": " + description : ""),
+          );
+        } else if (params.get("code")) {
+          finish(params.get("code"), params.get("state") || "");
+        } else {
+          begin();
+        }
       })();
     </script>
   </body>
