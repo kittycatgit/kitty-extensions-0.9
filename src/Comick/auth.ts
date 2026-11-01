@@ -1,21 +1,15 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright © 2026 kittycatgit */
 
-import { pkceChallenge, randomToken } from "./crypto";
 import {
   ACCESS_LIFETIME_MS,
-  AUTHORIZE_URL,
   CLIENT_ID,
   LIBRARY,
-  REDIRECT_URI,
   RESOURCE,
   REVOKE_URL,
-  SCOPES,
   SESSION_KEY,
-  STATE_KEY,
   TOKEN_URL,
   USER_KEY,
-  VERIFIER_KEY,
   type Session,
 } from "./models";
 
@@ -94,68 +88,31 @@ async function tokenRequest(
   }
 }
 
-// Comick wants the PKCE verifier and state kept across the sign-in, and the
-// app's own OAuth row cannot send the resource parameter, so the flow is ours.
-export function beginLogin(): string {
-  const verifier = randomToken(64);
-  const state = randomToken(24);
-
-  Application.setState(verifier, VERIFIER_KEY);
-  Application.setState(state, STATE_KEY);
-
-  const params: Record<string, string> = {
-    response_type: "code",
-    client_id: CLIENT_ID,
-    redirect_uri: REDIRECT_URI,
-    scope: SCOPES.join(" "),
-    resource: RESOURCE,
-    state,
-    code_challenge: pkceChallenge(verifier),
-    code_challenge_method: "S256",
-  };
-
-  return `${AUTHORIZE_URL}?${form(params)}`;
-}
-
-export async function completeLogin(code: string): Promise<string> {
-  const verifier = Application.getState(VERIFIER_KEY);
-
-  if (typeof verifier !== "string" || !verifier) {
-    throw new SessionError("Open Sign in to Comick first, then paste the code it shows.");
-  }
-
+// The sign-in page hands over a refresh token; the first refresh grant turns
+// it into a session and rotates it, so a pasted token only works once.
+export async function connectWithToken(token: string): Promise<string> {
   const json = await tokenRequest({
-    grant_type: "authorization_code",
-    code,
-    redirect_uri: REDIRECT_URI,
-    code_verifier: verifier,
+    grant_type: "refresh_token",
     client_id: CLIENT_ID,
+    refresh_token: token,
     resource: RESOURCE,
   });
 
   if (json.status !== 200 || !json.access_token) {
     throw new SessionError(
-      `Comick refused the code: ${json.error_description ?? json.error ?? json.text.slice(0, 120)}`,
-    );
-  }
-
-  if (!json.refresh_token) {
-    throw new SessionError(
-      "Comick issued no refresh token; approve offline access when signing in.",
+      `Comick refused the login token: ${json.error_description ?? json.error ?? json.text.slice(0, 120)}`,
     );
   }
 
   const session = sessionFrom(
     json,
-    { accessToken: "", refreshToken: json.refresh_token, expiresAt: 0 },
+    { accessToken: "", refreshToken: token, expiresAt: 0 },
     Date.now(),
   );
   const username = await fetchUsername(session);
 
   saveSession(session);
   Application.setState(username, USER_KEY);
-  Application.setState(undefined, VERIFIER_KEY);
-  Application.setState(undefined, STATE_KEY);
 
   return username;
 }

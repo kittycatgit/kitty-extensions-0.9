@@ -18,9 +18,8 @@ import {
 } from "@paperback/types";
 
 import {
-  beginLogin,
   clearSession,
-  completeLogin,
+  connectWithToken,
   currentSession,
   library,
   revokeSession,
@@ -29,6 +28,7 @@ import {
 } from "./auth";
 import {
   COLLECTIONS,
+  LOGIN_PAGE,
   COUNTRIES,
   DEFAULT_RATING,
   DEMOGRAPHICS,
@@ -56,18 +56,11 @@ export function storedRating(): string {
 export class ComickSettingsForm extends Form {
   private status = "";
 
-  private code = "";
-
-  private authorizeUrl = "";
+  private token = "";
 
   override getSections(): FormSectionElement<unknown>[] {
     const session = currentSession();
     const user = storedUsername();
-
-    // One verifier per sign-in attempt; a reload keeps the URL the webview opened.
-    if (!session && !this.authorizeUrl) {
-      this.authorizeUrl = beginLogin();
-    }
 
     return [
       Section(
@@ -78,7 +71,7 @@ export class ComickSettingsForm extends Form {
             this.status ||
             (session
               ? "Your library lists appear as collections, and chapters read in Paperback are sent back as progress."
-              : "Sign in, approve Paperback, copy the code Comick shows, paste it here and tap Connect."),
+              : "The sign-in page runs in Safari (or in-app below) and ends with a token to paste here."),
         },
         session
           ? [
@@ -92,20 +85,25 @@ export class ComickSettingsForm extends Form {
               }),
             ]
           : [
-              WebViewRow("signin", {
-                title: "Sign in to Comick",
-                request: { url: this.authorizeUrl, method: "GET" },
-                onComplete: Application.Selector(this as ComickSettingsForm, "webViewClosed"),
-                onCancel: Application.Selector(this as ComickSettingsForm, "webViewCancelled"),
+              LabelRow("how", {
+                title: "Sign in with Safari, then paste the login token here",
+                subtitle: `Open this page, approve Paperback and copy the token it shows:\n${LOGIN_PAGE}`,
               }),
-              InputRow("code", {
-                title: "Authorization code",
-                value: this.code,
-                onValueChange: Application.Selector(this as ComickSettingsForm, "codeChanged"),
+              InputRow("token", {
+                title: "Login token",
+                value: this.token,
+                isSecureEntry: true,
+                onValueChange: Application.Selector(this as ComickSettingsForm, "tokenChanged"),
               }),
               ButtonRow("connect", {
                 title: "Connect",
                 onSelect: Application.Selector(this as ComickSettingsForm, "connect"),
+              }),
+              WebViewRow("signin", {
+                title: "Open sign-in page here instead",
+                request: { url: LOGIN_PAGE, method: "GET" },
+                onComplete: Application.Selector(this as ComickSettingsForm, "webViewClosed"),
+                onCancel: Application.Selector(this as ComickSettingsForm, "webViewCancelled"),
               }),
             ],
       ),
@@ -138,18 +136,18 @@ export class ComickSettingsForm extends Form {
   }
 
   async webViewClosed(_cookies: unknown): Promise<void> {
-    // The code arrives by paste; the webview's cookies are not used.
+    // The token arrives by paste; the webview's cookies are not used.
   }
 
   async webViewCancelled(): Promise<void> {}
 
-  async codeChanged(value: string): Promise<void> {
-    this.code = value.trim();
+  async tokenChanged(value: string): Promise<void> {
+    this.token = value.trim();
   }
 
   async connect(): Promise<void> {
-    if (!this.code) {
-      this.status = "Paste the code shown after signing in.";
+    if (!this.token) {
+      this.status = "Paste the login token from the sign-in page.";
       this.reloadForm();
       return;
     }
@@ -158,10 +156,9 @@ export class ComickSettingsForm extends Form {
     this.reloadForm();
 
     try {
-      const username = await completeLogin(this.code);
+      const username = await connectWithToken(this.token);
 
-      this.code = "";
-      this.authorizeUrl = "";
+      this.token = "";
       this.status = `Connected as ${username}.`;
       Application.invalidateDiscoverSections();
     } catch (error: unknown) {

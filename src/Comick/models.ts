@@ -12,18 +12,15 @@ export const COVERS = "https://meo.comick.pictures";
 export const MISSING_COVER = `${COVERS}/none.webp`;
 
 export const CLIENT_ID = "NYkivlMXotQixhHCmArAhyyrAEmiqHYu";
-export const REDIRECT_URI = "https://kittycatgit.github.io/kitty-extensions-0.9/oauth/comick/";
+// The sign-in page runs the PKCE flow in the browser and hands back a refresh token.
+export const LOGIN_PAGE = "https://kittycatgit.github.io/kitty-extensions-0.9/oauth/comick/";
 export const RESOURCE = `${LIBRARY}`;
-export const SCOPES = ["library:read", "library:write", "offline_access"];
 export const TOKEN_URL = `${DOMAIN}/api/auth/oauth2/token`;
 export const REVOKE_URL = `${DOMAIN}/api/auth/oauth2/revoke`;
-export const AUTHORIZE_URL = `${DOMAIN}/api/auth/oauth2/authorize`;
 
 export const SESSION_KEY = "comick-session";
 export const USER_KEY = "comick-user";
 export const RATING_KEY = "comick-rating";
-export const VERIFIER_KEY = "comick-pkce-verifier";
-export const STATE_KEY = "comick-pkce-state";
 
 // Comick issues 15 minute access tokens; refresh a little early.
 export const ACCESS_LIFETIME_MS = 14 * 60 * 1000;
