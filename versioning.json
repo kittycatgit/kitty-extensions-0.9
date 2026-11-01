@@ -1,5 +1,5 @@
 {
-  "buildTime": "2026-11-01T03:46:10.721Z",
+  "buildTime": "2026-11-01T04:05:41.206Z",
   "builtWith": {
     "toolchain": "1.0.0-alpha.92",
     "types": "1.0.0-alpha.92"
@@ -35,7 +35,7 @@
     {
       "name": "Comick",
       "description": "Comick tracker: library lists, reading progress and ratings for comick.dev.",
-      "version": "6.0.0",
+      "version": "7.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "ADULT",
