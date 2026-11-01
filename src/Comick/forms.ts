@@ -13,6 +13,7 @@ import {
   StepperRow,
   TriStateSelectRow,
   WebViewRow,
+  type Cookie,
   type FormItemElement,
   type FormSectionElement,
 } from "@paperback/types";
@@ -71,7 +72,7 @@ export class ComickSettingsForm extends Form {
             this.status ||
             (session
               ? "Your library lists appear as collections, and chapters read in Paperback are sent back as progress."
-              : "The sign-in page runs in Safari (or in-app below) and ends with a token to paste here."),
+              : "Sign in and approve Paperback, then tap Done; the connection completes on its own."),
         },
         session
           ? [
@@ -85,9 +86,11 @@ export class ComickSettingsForm extends Form {
               }),
             ]
           : [
-              LabelRow("how", {
-                title: "Sign in with Safari, then paste the login token here",
-                subtitle: `Open this page, approve Paperback and copy the token it shows:\n${LOGIN_PAGE}`,
+              WebViewRow("signin", {
+                title: "Sign in to Comick",
+                request: { url: LOGIN_PAGE, method: "GET" },
+                onComplete: Application.Selector(this as ComickSettingsForm, "webViewClosed"),
+                onCancel: Application.Selector(this as ComickSettingsForm, "webViewCancelled"),
               }),
               InputRow("token", {
                 title: "Login token",
@@ -99,11 +102,9 @@ export class ComickSettingsForm extends Form {
                 title: "Connect",
                 onSelect: Application.Selector(this as ComickSettingsForm, "connect"),
               }),
-              WebViewRow("signin", {
-                title: "Open sign-in page here instead",
-                request: { url: LOGIN_PAGE, method: "GET" },
-                onComplete: Application.Selector(this as ComickSettingsForm, "webViewClosed"),
-                onCancel: Application.Selector(this as ComickSettingsForm, "webViewCancelled"),
+              LabelRow("safari", {
+                title: "Prefer Safari?",
+                subtitle: `Open ${LOGIN_PAGE.replace("https://", "")} there and paste the token above.`,
               }),
             ],
       ),
@@ -135,8 +136,21 @@ export class ComickSettingsForm extends Form {
     ];
   }
 
-  async webViewClosed(_cookies: unknown): Promise<void> {
-    // The token arrives by paste; the webview's cookies are not used.
+  // The sign-in page leaves the token in a cookie for the in-app webview;
+  // Safari users paste it instead.
+  async webViewClosed(cookies: Cookie[]): Promise<void> {
+    const found = (cookies ?? []).find(
+      (cookie) =>
+        cookie.name === "comick_login_token" &&
+        cookie.domain.replace(/^\./, "") === "kittycatgit.github.io",
+    );
+
+    if (!found?.value) {
+      return;
+    }
+
+    this.token = decodeURIComponent(found.value);
+    await this.connect();
   }
 
   async webViewCancelled(): Promise<void> {}
