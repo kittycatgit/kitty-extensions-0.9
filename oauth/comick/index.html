@@ -98,14 +98,15 @@
         margin-top: 12px;
         color: var(--muted);
       }
+      a {
+        color: var(--accent);
+      }
     </style>
   </head>
   <body>
     <main id="start" class="hidden">
-      <h1>Connect Comick to Paperback</h1>
-      <p>Sign in on comick.dev and approve Paperback. You come back here with a login token.</p>
-      <button id="signin" class="button" type="button">Sign in with Comick</button>
-      <small>Keep "offline access" ticked on the approval screen, or no token is issued.</small>
+      <h1>Opening Comick sign-in…</h1>
+      <p>Sign in on comick.dev and approve Paperback, including offline access.</p>
     </main>
     <main id="busy" class="hidden">
       <h1>Finishing sign-in…</h1>
@@ -113,13 +114,17 @@
     </main>
     <main id="done" class="hidden ok">
       <h1 id="who">Signed in</h1>
-      <p>Paste this into Login token in Paperback's Comick settings and tap Connect.</p>
+      <p>
+        Opened this inside Paperback? Tap Done and it connects by itself. Otherwise copy the token
+        and paste it into Paperback's Comick settings.
+      </p>
       <small>Paperback login token</small>
       <code id="token"></code>
       <button id="copy" class="button" type="button">Copy token</button>
       <small
         >It works once and expires in 30 days; Paperback renews it on its own after that.</small
       >
+      <small><a id="startover" href="#">Start over</a></small>
     </main>
     <main id="failed" class="hidden error">
       <h1 id="failedTitle">Sign-in failed</h1>
@@ -149,11 +154,13 @@
           $("failedText").textContent = text;
           show("failed");
         };
-        var restart = function () {
+        var restart = function (event) {
+          if (event) {
+            event.preventDefault();
+          }
           sessionStorage.removeItem("comick-verifier");
           sessionStorage.removeItem("comick-state");
-          history.replaceState(null, "", location.pathname);
-          show("start");
+          location.replace(location.pathname);
         };
 
         function random(length) {
@@ -190,19 +197,20 @@
           sessionStorage.setItem("comick-state", state);
           crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)).then(
             function (digest) {
-              location.href =
+              location.replace(
                 AUTHORIZE +
-                "?" +
-                form({
-                  response_type: "code",
-                  client_id: CLIENT_ID,
-                  redirect_uri: REDIRECT_URI,
-                  scope: "library:read library:write offline_access",
-                  resource: RESOURCE,
-                  state: state,
-                  code_challenge: base64url(digest),
-                  code_challenge_method: "S256",
-                });
+                  "?" +
+                  form({
+                    response_type: "code",
+                    client_id: CLIENT_ID,
+                    redirect_uri: REDIRECT_URI,
+                    scope: "library:read library:write offline_access",
+                    resource: RESOURCE,
+                    state: state,
+                    code_challenge: base64url(digest),
+                    code_challenge_method: "S256",
+                  }),
+              );
             },
             function (error) {
               fail("This browser cannot sign in", String(error));
@@ -277,6 +285,11 @@
             .then(function (me) {
               $("who").textContent = "Signed in as " + (me.username || "Comick user");
               $("token").textContent = refresh;
+              // Lets Paperback's in-app webview pick the token up on Done.
+              document.cookie =
+                "comick_login_token=" +
+                encodeURIComponent(refresh) +
+                "; Path=/kitty-extensions-0.9/oauth/comick/; Max-Age=900; Secure; SameSite=Lax";
               show("done");
             })
             .catch(function (error) {
@@ -284,8 +297,8 @@
             });
         }
 
-        $("signin").addEventListener("click", begin);
         $("retry").addEventListener("click", restart);
+        $("startover").addEventListener("click", restart);
         $("copy").addEventListener("click", function () {
           var button = this;
           navigator.clipboard.writeText($("token").textContent).then(
@@ -315,6 +328,7 @@
           finish(params.get("code"), params.get("state") || "");
         } else {
           show("start");
+          begin();
         }
       })();
     </script>
