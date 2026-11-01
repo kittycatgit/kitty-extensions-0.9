@@ -12,24 +12,22 @@ import {
   SelectRow,
   StepperRow,
   TriStateSelectRow,
-  WebViewRow,
-  type Cookie,
   type FormItemElement,
   type FormSectionElement,
 } from "@paperback/types";
 
 import {
   clearSession,
-  connectWithToken,
+  completeLogin,
   currentSession,
   library,
   revokeSession,
+  signInLink,
   storedUsername,
   type LibraryResult,
 } from "./auth";
 import {
   COLLECTIONS,
-  LOGIN_PAGE,
   COUNTRIES,
   DEFAULT_RATING,
   DEMOGRAPHICS,
@@ -57,7 +55,7 @@ export function storedRating(): string {
 export class ComickSettingsForm extends Form {
   private status = "";
 
-  private token = "";
+  private code = "";
 
   override getSections(): FormSectionElement<unknown>[] {
     const session = currentSession();
@@ -72,7 +70,7 @@ export class ComickSettingsForm extends Form {
             this.status ||
             (session
               ? "Your library lists appear as collections, and chapters read in Paperback are sent back as progress."
-              : "Sign in and approve Paperback, then tap Done; the connection completes on its own."),
+              : "The link is yours alone and stays valid until a code is used."),
         },
         session
           ? [
@@ -86,25 +84,24 @@ export class ComickSettingsForm extends Form {
               }),
             ]
           : [
-              WebViewRow("signin", {
-                title: "Sign in to Comick",
-                request: { url: LOGIN_PAGE, method: "GET" },
-                onComplete: Application.Selector(this as ComickSettingsForm, "webViewClosed"),
-                onCancel: Application.Selector(this as ComickSettingsForm, "webViewCancelled"),
+              InputRow("link", {
+                title: "Sign-in link",
+                value: signInLink(),
+                onValueChange: Application.Selector(this as ComickSettingsForm, "linkEdited"),
               }),
-              InputRow("token", {
-                title: "Login token",
-                value: this.token,
-                isSecureEntry: true,
-                onValueChange: Application.Selector(this as ComickSettingsForm, "tokenChanged"),
+              LabelRow("steps", {
+                title: "How to connect",
+                subtitle:
+                  "1. Tap the link above, select all, copy. 2. Paste it in Safari and sign in to Comick. 3. Copy the code it shows and paste it below.",
+              }),
+              InputRow("code", {
+                title: "Code",
+                value: this.code,
+                onValueChange: Application.Selector(this as ComickSettingsForm, "codeChanged"),
               }),
               ButtonRow("connect", {
                 title: "Connect",
                 onSelect: Application.Selector(this as ComickSettingsForm, "connect"),
-              }),
-              LabelRow("safari", {
-                title: "Google, Apple or passkey sign-in needs Safari",
-                subtitle: `Open ${LOGIN_PAGE.replace("https://", "")} there, then paste the token above.`,
               }),
             ],
       ),
@@ -136,32 +133,18 @@ export class ComickSettingsForm extends Form {
     ];
   }
 
-  // The sign-in page leaves the token in a cookie for the in-app webview;
-  // Safari users paste it instead.
-  async webViewClosed(cookies: Cookie[]): Promise<void> {
-    const found = (cookies ?? []).find(
-      (cookie) =>
-        cookie.name === "comick_login_token" &&
-        cookie.domain.replace(/^\./, "") === "kittycatgit.github.io",
-    );
-
-    if (!found?.value) {
-      return;
-    }
-
-    this.token = decodeURIComponent(found.value);
-    await this.connect();
+  // The link is read-only; typing in it would only desync it from the verifier.
+  async linkEdited(_value: string): Promise<void> {
+    this.reloadForm();
   }
 
-  async webViewCancelled(): Promise<void> {}
-
-  async tokenChanged(value: string): Promise<void> {
-    this.token = value.trim();
+  async codeChanged(value: string): Promise<void> {
+    this.code = value.trim();
   }
 
   async connect(): Promise<void> {
-    if (!this.token) {
-      this.status = "Paste the login token from the sign-in page.";
+    if (!this.code) {
+      this.status = "Paste the code from the sign-in page.";
       this.reloadForm();
       return;
     }
@@ -170,9 +153,9 @@ export class ComickSettingsForm extends Form {
     this.reloadForm();
 
     try {
-      const username = await connectWithToken(this.token);
+      const username = await completeLogin(this.code);
 
-      this.token = "";
+      this.code = "";
       this.status = `Connected as ${username}.`;
       Application.invalidateDiscoverSections();
     } catch (error: unknown) {

@@ -1,15 +1,22 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright © 2026 kittycatgit */
 
+import { pkceChallenge, randomToken } from "./crypto";
 import {
   ACCESS_LIFETIME_MS,
+  AUTHORIZE_URL,
   CLIENT_ID,
   LIBRARY,
+  LINK_KEY,
+  REDIRECT_URI,
   RESOURCE,
   REVOKE_URL,
+  SCOPES,
   SESSION_KEY,
+  STATE_KEY,
   TOKEN_URL,
   USER_KEY,
+  VERIFIER_KEY,
   type Session,
 } from "./models";
 
@@ -90,29 +97,91 @@ async function tokenRequest(
 
 // The sign-in page hands over a refresh token; the first refresh grant turns
 // it into a session and rotates it, so a pasted token only works once.
-export async function connectWithToken(token: string): Promise<string> {
-  const json = await tokenRequest({
-    grant_type: "refresh_token",
+// One PKCE attempt lives across settings opens until a code is exchanged:
+// the link the user copies must match the verifier the exchange sends.
+export function signInLink(): string {
+  const stored = Application.getState(LINK_KEY);
+
+  if (typeof stored === "string" && stored && Application.getState(VERIFIER_KEY)) {
+    return stored;
+  }
+
+  return freshSignInLink();
+}
+
+function freshSignInLink(): string {
+  const verifier = randomToken(64);
+  const state = randomToken(24);
+  const link = `${AUTHORIZE_URL}?${form({
+    response_type: "code",
     client_id: CLIENT_ID,
-    refresh_token: token,
+    redirect_uri: REDIRECT_URI,
+    scope: SCOPES.join(" "),
+    resource: RESOURCE,
+    state,
+    code_challenge: pkceChallenge(verifier),
+    code_challenge_method: "S256",
+  })}`;
+
+  Application.setState(verifier, VERIFIER_KEY);
+  Application.setState(state, STATE_KEY);
+  Application.setState(link, LINK_KEY);
+
+  return link;
+}
+
+function clearSignInLink(): void {
+  Application.setState(undefined, VERIFIER_KEY);
+  Application.setState(undefined, STATE_KEY);
+  Application.setState(undefined, LINK_KEY);
+}
+
+export async function completeLogin(code: string): Promise<string> {
+  const verifier = Application.getState(VERIFIER_KEY);
+
+  if (typeof verifier !== "string" || !verifier) {
+    freshSignInLink();
+    throw new SessionError("Copy the sign-in link first, sign in, then paste the code it shows.");
+  }
+
+  const json = await tokenRequest({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: REDIRECT_URI,
+    code_verifier: verifier,
+    client_id: CLIENT_ID,
     resource: RESOURCE,
   });
 
+  if (json.error === "invalid_grant") {
+    freshSignInLink();
+    throw new SessionError(
+      "This code was already used or expired. Copy the new sign-in link and try again.",
+    );
+  }
+
   if (json.status !== 200 || !json.access_token) {
     throw new SessionError(
-      `Comick refused the login token: ${json.error_description ?? json.error ?? json.text.slice(0, 120)}`,
+      `Comick refused the code: ${json.error_description ?? json.error ?? json.text.slice(0, 120)}`,
+    );
+  }
+
+  if (!json.refresh_token) {
+    throw new SessionError(
+      "Comick issued no refresh token; approve offline access when signing in.",
     );
   }
 
   const session = sessionFrom(
     json,
-    { accessToken: "", refreshToken: token, expiresAt: 0 },
+    { accessToken: "", refreshToken: json.refresh_token, expiresAt: 0 },
     Date.now(),
   );
   const username = await fetchUsername(session);
 
   saveSession(session);
   Application.setState(username, USER_KEY);
+  clearSignInLink();
 
   return username;
 }
