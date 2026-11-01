@@ -11,8 +11,15 @@ import {
 import { currentSession } from "./auth";
 import { API, DOMAIN, LIBRARY } from "./models";
 
+const isOurs = (url: string): boolean =>
+  url.startsWith(API) || url.startsWith(`${DOMAIN}/api/auth/`);
+
 export class ComickInterceptor extends PaperbackInterceptor {
   override async interceptRequest(request: Request): Promise<Request> {
+    // Only the API and the OAuth endpoints get our headers. Everything else
+    // (the sign-in webview, its assets, covers) must reach the site untouched.
+    if (!isOurs(request.url)) return request;
+
     const session = request.url.startsWith(LIBRARY) ? currentSession() : undefined;
 
     request.headers = {
@@ -31,6 +38,8 @@ export class ComickInterceptor extends PaperbackInterceptor {
     response: Response,
     data: ArrayBuffer,
   ): Promise<ArrayBuffer> {
+    if (!isOurs(request.url)) return data;
+
     const challenged =
       response.headers?.["cf-mitigated"] === "challenge" ||
       (response.status === 403 &&
