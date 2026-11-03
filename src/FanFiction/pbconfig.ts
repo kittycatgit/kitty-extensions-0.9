@@ -6,7 +6,7 @@ import { ContentRating, SourceIntents, type ExtensionInfo } from "@paperback/typ
 export default {
   name: "FanFiction",
   description: "Extension that pulls content from fanfiction.net.",
-  version: "1.0.0",
+  version: "2.0.0",
   icon: "icon.png",
   language: "multi",
   contentRating: ContentRating.MATURE,

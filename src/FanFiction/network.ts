@@ -35,15 +35,12 @@ export class FanFictionInterceptor extends PaperbackInterceptor {
     response: Response,
     data: ArrayBuffer,
   ): Promise<ArrayBuffer> {
-    // Every page is behind a Cloudflare managed challenge; the challenge page
-    // itself is small, so sniff short HTML bodies even when the status is 200.
-    const type = response.headers?.["content-type"] ?? "";
-    const sniff = response.status !== 200 || (/html/i.test(type) && data.byteLength < 40_000);
-    const body = sniff ? Application.arrayBufferToUTF8String(data) : "";
+    // Cloudflare marks every challenge with cf-mitigated; real pages embed the
+    // challenge-platform script too, so never sniff 200 bodies for it.
     const challenged =
       response.headers?.["cf-mitigated"] === "challenge" ||
-      ((response.status === 403 || response.status === 503 || response.status === 200) &&
-        isChallenge(body));
+      ((response.status === 403 || response.status === 503) &&
+        isChallenge(Application.arrayBufferToUTF8String(data)));
 
     if (challenged) {
       throw new CloudflareError(

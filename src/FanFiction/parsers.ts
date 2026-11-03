@@ -18,7 +18,7 @@ import {
 const GENRE_NAMES = new Set(GENRES.map((genre) => genre.title));
 
 export function isChallenge(body: string): boolean {
-  return /<title>Just a moment\.\.\.<\/title>|challenge-platform|cf_chl_opt/i.test(body);
+  return /<title>Just a moment\.\.\.<\/title>/i.test(body);
 }
 
 function absolute(path: string | undefined): string | undefined {
