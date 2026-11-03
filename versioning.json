@@ -1,5 +1,5 @@
 {
-  "buildTime": "2026-11-01T04:34:08.863Z",
+  "buildTime": "2026-11-03T07:23:37.276Z",
   "builtWith": {
     "toolchain": "1.0.0-alpha.92",
     "types": "1.0.0-alpha.92"
@@ -78,6 +78,52 @@
         4
       ],
       "id": "DankeFursLesen"
+    },
+    {
+      "name": "DivaScans",
+      "description": "Extension that pulls content from divascans.org.",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "language": "en",
+      "contentRating": "ADULT",
+      "badges": [],
+      "developers": [
+        {
+          "name": "kittycatgit",
+          "website": "https://github.com/kittycatgit",
+          "github": "https://github.com/kittycatgit"
+        }
+      ],
+      "capabilities": [
+        1,
+        64,
+        4,
+        16
+      ],
+      "id": "DivaScans"
+    },
+    {
+      "name": "FanFiction",
+      "description": "Extension that pulls content from fanfiction.net.",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "language": "multi",
+      "contentRating": "MATURE",
+      "badges": [],
+      "developers": [
+        {
+          "name": "kittycatgit",
+          "website": "https://github.com/kittycatgit",
+          "github": "https://github.com/kittycatgit"
+        }
+      ],
+      "capabilities": [
+        1,
+        64,
+        4,
+        16
+      ],
+      "id": "FanFiction"
     },
     {
       "name": "HiperDex",
@@ -311,6 +357,29 @@
       "id": "SilentQuill"
     },
     {
+      "name": "SoraRaw",
+      "description": "Extension that pulls content from soraraw.com.",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "language": "ja",
+      "contentRating": "ADULT",
+      "badges": [],
+      "developers": [
+        {
+          "name": "kittycatgit",
+          "website": "https://github.com/kittycatgit",
+          "github": "https://github.com/kittycatgit"
+        }
+      ],
+      "capabilities": [
+        1,
+        64,
+        4,
+        16
+      ],
+      "id": "SoraRaw"
+    },
+    {
       "name": "TCB Scans",
       "description": "Extension that pulls content from tcbonepiecechapters.com.",
       "version": "1.0.0",
@@ -355,6 +424,29 @@
         16
       ],
       "id": "ToonTop"
+    },
+    {
+      "name": "Toonz",
+      "description": "Extension that pulls content from toonz.to.",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "language": "en",
+      "contentRating": "ADULT",
+      "badges": [],
+      "developers": [
+        {
+          "name": "kittycatgit",
+          "website": "https://github.com/kittycatgit",
+          "github": "https://github.com/kittycatgit"
+        }
+      ],
+      "capabilities": [
+        1,
+        64,
+        4,
+        16
+      ],
+      "id": "Toonz"
     },
     {
       "name": "Webnex",
