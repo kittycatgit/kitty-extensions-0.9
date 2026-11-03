@@ -6,6 +6,8 @@ Paperback 0.9 extensions.
 
 - [CoffeeManga](https://coffeemanga.net)
 - [DankeFursLesen](https://danke.moe)
+- [DivaScans](https://divascans.org) — comics and novels
+- [FanFiction](https://www.fanfiction.net) — novels
 - [HiperDex](https://hiperdex.tv)
 - [Kavita](https://www.kavitareader.com) — your own server
 - [Kayn Scan](https://kaynscans.com)
@@ -17,8 +19,10 @@ Paperback 0.9 extensions.
 - [OniSaga](https://onisaga.com)
 - [ScytheScans](https://scythescans.com)
 - [SilentQuill](https://www.silentquill.net)
+- [SoraRaw](https://soraraw.com) — Japanese
 - [TCB Scans](https://tcbonepiecechapters.com)
 - [ToonTop](https://toontop.io)
+- [Toonz](https://toonz.to)
 - [ZinManga](https://www.zinmanga.net)
 
 ## Install
