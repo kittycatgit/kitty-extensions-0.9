@@ -8,7 +8,7 @@ import {
   type Response,
 } from "@paperback/types";
 
-import { DOMAIN, HTML_GAP_MS, READER_TOKEN_HEADER, USER_AGENT, pagesInfoUrl } from "./models";
+import { DOMAIN, HTML_GAP_MS, USER_AGENT } from "./models";
 
 // Copied from BasicRateLimiter: the same lock exists in @paperback/types but is
 // not exported, and it is the only primitive that serialises on the native bridge.
@@ -41,40 +41,7 @@ function unlock(uid: string): void {
 const HTML_LOCK = "onisaga.htmlFetch";
 const LAST_AT_KEY = "onisaga.lastAt";
 
-// Page URLs are minted only in the WebView when the chapter opens. Do not add a
-// fallback resolver here - it takes over silently and refetches every few seconds.
 export class OniSagaInterceptor extends PaperbackInterceptor {
-  async chapterInfo(
-    chapterId: string,
-    token: string,
-  ): Promise<{ total: number; importing: boolean } | undefined> {
-    try {
-      const [response, buffer] = await Application.scheduleRequest({
-        url: pagesInfoUrl(chapterId),
-        method: "GET",
-        headers: {
-          accept: "application/json",
-          [READER_TOKEN_HEADER]: token,
-          referer: `${DOMAIN}/`,
-          "user-agent": USER_AGENT,
-        },
-      });
-
-      if (response.status !== 200) {
-        return undefined;
-      }
-
-      const body = JSON.parse(Application.arrayBufferToUTF8String(buffer)) as {
-        total_pages?: number;
-        importing?: boolean;
-      };
-
-      return { total: Number(body.total_pages ?? 0), importing: body.importing === true };
-    } catch {
-      return undefined;
-    }
-  }
-
   override async interceptRequest(request: Request): Promise<Request> {
     request.headers = {
       ...request.headers,
@@ -88,10 +55,9 @@ export class OniSagaInterceptor extends PaperbackInterceptor {
     return request;
   }
 
-  // Images are skipped: they are not metered and their URLs were already signed
-  // when the chapter opened.
+  // Images are not metered; only the site's own pages are spaced out.
   private async paceBrowsing(url: string): Promise<void> {
-    if (!url.startsWith(DOMAIN) || /\/_img\//.test(url)) {
+    if (!url.startsWith(DOMAIN)) {
       return;
     }
 

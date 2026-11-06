@@ -7,258 +7,363 @@ import {
   type SearchResultItem,
   type SourceManga,
   type Tag,
+  type TagSection,
 } from "@paperback/types";
-import type { CheerioAPI } from "cheerio";
+import type { CheerioAPI, Cheerio } from "cheerio";
+import type { Element } from "domhandler";
 
-import { DOMAIN, FALLBACK_COVER, STATUS_LABELS } from "./models";
+import { encodeId } from "../shared/ids";
+import { DOMAIN, STATUS_LABELS, coverUrl, type Listing, type Option } from "./models";
 
-function absolute(url: string | undefined): string {
-  if (!url) {
-    return "";
-  }
-
-  if (/^https?:\/\//i.test(url)) {
-    return url;
-  }
-
-  return `${DOMAIN}${url.startsWith("/") ? "" : "/"}${url}`;
+function text($el: Cheerio<Element>): string {
+  return $el.text().replace(/\s+/g, " ").trim();
 }
 
 export function slugFromHref(href: string | undefined): string | undefined {
-  return href?.match(/\/manga\/([^/?#]+)/)?.[1];
+  return href?.match(/\/title\/([^/?#]+)/)?.[1];
 }
 
-export function chapterIdFromHref(href: string | undefined): string | undefined {
-  return href?.match(/\/read\/[^/]+\/([^/?#]+)/)?.[1];
+export function releaseFromHref(href: string | undefined): string | undefined {
+  return href?.match(/\/read\/[^/?#]+\/([^/?#]+)/)?.[1];
 }
 
-// The cover sits outside the anchor, in the card wrapper. Stop after two levels
-// up or a card picks up its neighbour's image.
-function coverNear($: CheerioAPI, link: ReturnType<CheerioAPI>): { src?: string; alt?: string } {
-  const read = (scope: ReturnType<CheerioAPI>): { src?: string; alt?: string } | undefined => {
-    const image = scope.find("img").first();
-
-    if (image.length === 0) {
-      return undefined;
-    }
-
-    const src = image.attr("src") ?? image.attr("data-src") ?? image.attr("data-lazy-src");
-    return { ...(src ? { src } : {}), ...(image.attr("alt") ? { alt: image.attr("alt") } : {}) };
-  };
-
-  const own = read(link);
-
-  if (own?.src) {
-    return own;
-  }
-
-  let node = link.parent();
-
-  for (let level = 0; level < 2 && node.length > 0; level += 1) {
-    const found = read(node);
-
-    if (found?.src) {
-      return found;
-    }
-
-    node = node.parent();
-  }
-
-  return own ?? {};
+export function cursorFromHref(href: string | undefined): string | undefined {
+  const cursor = href?.match(/[?&](?:cursor|cc)=([^&#]+)/)?.[1];
+  return cursor ? decodeURIComponent(cursor) : undefined;
 }
 
-function cleanTitle(value: string | undefined): string | undefined {
-  const cleaned = (value ?? "")
-    // Alt text is the title plus a label: "… manga cover" or "… cover".
-    .replace(/\s*(?:manga\s*)?cover\s*$/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
+// Cards everywhere carry a cover <img>, a `/title/` link and a medium badge;
+// the title is the link text or the jacket fallback when the cover is missing.
+export function parseCards($: CheerioAPI): SearchResultItem[] {
+  const items: SearchResultItem[] = [];
+  const seen = new Set<string>();
 
-  // Card buttons share the series link; their labels are not titles.
-  return cleaned && !/^(read now|read|continue)$/i.test(cleaned) ? cleaned : undefined;
-}
-
-// A card links to its series from the cover, the title and a "Read Now" button,
-// and the button comes first, so merge every anchor for a slug.
-export function parseListing($: CheerioAPI): SearchResultItem[] {
-  const found = new Map<string, { title?: string; imageUrl?: string }>();
-  const order: string[] = [];
-
-  for (const element of $('a[href*="/manga/"]').toArray()) {
+  for (const element of $('a[href*="/title/"]').toArray()) {
     const link = $(element);
     const slug = slugFromHref(link.attr("href"));
-
-    if (!slug) {
+    if (!slug || seen.has(slug)) {
       continue;
     }
 
-    if (!found.has(slug)) {
-      found.set(slug, {});
-      order.push(slug);
-    }
-
-    const entry = found.get(slug)!;
-
-    const cover = coverNear($, link);
-
-    if (!entry.imageUrl && cover.src) {
-      entry.imageUrl = absolute(cover.src);
-    }
-
-    if (!entry.title) {
-      entry.title =
-        cleanTitle(link.attr("title")) ?? cleanTitle(cover.alt) ?? cleanTitle(link.text());
-    }
-  }
-
-  const items: SearchResultItem[] = [];
-
-  for (const slug of order) {
-    const entry = found.get(slug)!;
-
-    if (!entry.title) {
+    const card = link.closest("li, article").first();
+    const host = card.length ? card : link;
+    const medium = (
+      host.attr("data-medium") ??
+      host.find("[data-medium]").attr("data-medium") ??
+      ""
+    ).toLowerCase();
+    if (medium === "novel") {
       continue;
     }
+
+    const title =
+      text(host.find("h3, h2, [class*=Title], [class*=title]").first()) ||
+      text(
+        host
+          .find("a[href*='/title/']")
+          .filter((_, a) => text($(a)).length > 0)
+          .first(),
+      ) ||
+      text(link);
+    if (!title) {
+      continue;
+    }
+
+    seen.add(slug);
+    const chapters = text(host.find("[class*=_meta] [aria-hidden], [class*=unitLabel]").first());
+    const updated = text(host.find("time").first());
+    const subtitle = [chapters && /^\d/.test(chapters) ? chapters : "", updated]
+      .filter(Boolean)
+      .join(" · ");
 
     items.push({
       mangaId: slug,
-      title: entry.title,
-      imageUrl: entry.imageUrl || FALLBACK_COVER,
+      title,
+      imageUrl: coverUrl(slug),
+      ...(subtitle ? { subtitle } : {}),
     });
   }
 
   return items;
 }
 
+export function parseListing($: CheerioAPI): Listing {
+  const next = $('a[href*="cursor="]')
+    .toArray()
+    .map((a) => $(a).attr("href"))
+    .find(Boolean);
+
+  return { items: parseCards($), cursor: cursorFromHref(next) };
+}
+
+export type UpdateEntry = {
+  mangaId: string;
+  title: string;
+  chapterId: string;
+  label: string;
+  date?: Date;
+};
+
+export function parseUpdates($: CheerioAPI): { entries: UpdateEntry[]; cursor?: string } {
+  const entries: UpdateEntry[] = [];
+
+  for (const element of $("li.iuPllG_entry, li[class*=_entry]").toArray()) {
+    const entry = $(element);
+    if ((entry.attr("data-medium") ?? "").toLowerCase() === "novel") {
+      continue;
+    }
+
+    const slug = slugFromHref(entry.find('a[href*="/title/"]').attr("href"));
+    const title = text(entry.find("[class*=entryTitle] a").first());
+    const unit = entry.find('a[href*="/read/"]').first();
+    const chapterId = releaseFromHref(unit.attr("href"));
+    if (!slug || !title || !chapterId) {
+      continue;
+    }
+
+    const label = text(unit.find("[class*=unitTitle]").first()) || text(unit);
+    const when = unit.find("time").attr("datetime");
+    const date = when ? new Date(when) : undefined;
+    entries.push({
+      mangaId: slug,
+      title,
+      chapterId,
+      label,
+      ...(date && !isNaN(date.getTime()) ? { date } : {}),
+    });
+  }
+
+  const next = $('a[href*="/updates?cursor="]').attr("href");
+  return { entries, cursor: cursorFromHref(next) };
+}
+
+export function parseSpotlight($: CheerioAPI): { slug: string; title: string; summary: string }[] {
+  const slides: { slug: string; title: string; summary: string }[] = [];
+
+  for (const element of $("[data-slide], [class*=_slide]").toArray()) {
+    const slide = $(element);
+    if ((slide.find("[data-medium]").attr("data-medium") ?? "").toLowerCase() === "novel") {
+      continue;
+    }
+
+    const link = slide.find('h2 a[href*="/title/"], a[href*="/title/"]').first();
+    const slug = slugFromHref(link.attr("href"));
+    const title = text(link);
+    if (!slug || !title || slides.some((s) => s.slug === slug)) {
+      continue;
+    }
+
+    slides.push({ slug, title, summary: text(slide.find("[class*=synopsis]").first()) });
+  }
+
+  return slides;
+}
+
+export function parseTrending($: CheerioAPI): SearchResultItem[] {
+  const items: SearchResultItem[] = [];
+  const section = $('section[aria-labelledby="trending-title"]');
+
+  for (const element of section.find('a[href*="/title/"]').toArray()) {
+    const link = $(element);
+    const slug = slugFromHref(link.attr("href"));
+    const title = text(link);
+    if (slug && title && !items.some((item) => item.mangaId === slug)) {
+      items.push({ mangaId: slug, title, imageUrl: coverUrl(slug) });
+    }
+  }
+
+  return items;
+}
+
+// The browse form lists every genre as a checkbox with its title count.
+export function parseGenres($: CheerioAPI): Option[] {
+  const genres: Option[] = [];
+
+  for (const element of $('input[type="checkbox"][name="genre"]').toArray()) {
+    const input = $(element);
+    const id = input.attr("value");
+    const label = input.closest("label");
+    const title = text(label.find("[class*=checkRow]").first() || label)
+      .replace(/\s*\d[\d,]*\s*$/, "")
+      .trim();
+    if (id && title) {
+      genres.push({ id: encodeId(id), title });
+    }
+  }
+
+  return genres;
+}
+
+function facts($: CheerioAPI): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const dl of $("main dl").toArray()) {
+    const children = $(dl).children("dt, dd, div").toArray();
+    let key = "";
+    for (const child of children) {
+      const el = $(child);
+      if (child.tagName === "div") {
+        const dt = text(el.find("dt").first());
+        const dd = text(el.find("dd").first());
+        if (dt && dd) map.set(dt.toLowerCase(), dd);
+        continue;
+      }
+      if (child.tagName === "dt") {
+        key = text(el).toLowerCase();
+      } else if (key && !map.has(key)) {
+        map.set(key, text(el));
+      }
+    }
+  }
+  return map;
+}
+
+function ratingOf(label: string | undefined, synopsis: string): ContentRating {
+  const value = (label ?? "").toLowerCase();
+  if (/adult|explicit|pornographic|18\+|hentai/.test(value)) return ContentRating.ADULT;
+  if (/mature|teen|suggestive|erotica|17\+|16\+/.test(value)) return ContentRating.MATURE;
+  if (/general|everyone|all ages|safe/.test(value)) return ContentRating.EVERYONE;
+  return /\b(sex|hentai|smut)\b/i.test(synopsis) ? ContentRating.ADULT : ContentRating.MATURE;
+}
+
 export function parseMangaDetails($: CheerioAPI, mangaId: string): SourceManga {
-  const meta = (property: string): string | undefined =>
-    $(`meta[property="${property}"]`).attr("content")?.trim() ||
-    $(`meta[name="${property}"]`).attr("content")?.trim();
+  const title = text($("main h1").first()) || mangaId;
+  const synopsis = text($("[class*=synopsis]").first());
+  const info = facts($);
 
-  const title = $("h1").first().text().replace(/\s+/g, " ").trim() || mangaId;
-
-  const tags: Tag[] = [];
-  const seenGenre = new Set<string>();
-  for (const element of $('a[href*="/genre/"]').toArray()) {
-    const anchor = $(element);
-    const id = anchor.attr("href")?.match(/\/genre\/([^/?#]+)/)?.[1];
-    const label = anchor.text().replace(/\s+/g, " ").trim();
-
-    if (id && label && !seenGenre.has(id)) {
-      seenGenre.add(id);
-      tags.push({ id, title: label });
+  const secondaryTitles: string[] = [];
+  const titles = $('section[aria-labelledby="titles-heading"]');
+  for (const dd of titles.find("dd").toArray()) {
+    const alt = text($(dd));
+    if (alt && alt !== title && !secondaryTitles.includes(alt)) {
+      secondaryTitles.push(alt);
     }
   }
 
-  // The "Authors" heading is itself an author link; skip it.
   const authors: string[] = [];
-  for (const element of $('a[href*="/author"]').toArray()) {
-    const name = $(element).text().replace(/\s+/g, " ").trim();
-    if (name && !/^authors?$/i.test(name) && !authors.includes(name)) {
-      authors.push(name);
-    }
+  const artists: string[] = [];
+  for (const element of $("[class*=creditRole]").toArray()) {
+    const role = text($(element)).toLowerCase();
+    const name = text($(element).parent().find("[class*=creditName]").first());
+    if (!name) continue;
+    if (/art|illustrat|draw/.test(role)) artists.push(name);
+    else authors.push(name);
   }
 
-  const statusText = $("*")
-    .filter((_, element) => {
-      const node = $(element);
-      return (
-        node.children().length === 0 &&
-        /^(ongoing|completed|hiatus|cancelled|dropped)$/i.test(node.text().trim())
-      );
-    })
-    .first()
-    .text()
-    .trim()
-    .toLowerCase();
+  const groups = new Map<string, Tag[]>();
+  const terms = $('section[aria-labelledby="terms-heading"]');
+  const termScope = terms.length ? terms : $("main");
+  for (const element of termScope.find('a[href*="/browse?"]').toArray()) {
+    const href = $(element).attr("href") ?? "";
+    const match = /[?&](genre|theme|tag|demographic|form)=([^&#]+)/.exec(href);
+    const name = text($(element));
+    if (!match?.[1] || !match[2] || !name) continue;
+    const group = match[1] === "genre" ? "Genres" : match[1] === "theme" ? "Themes" : "Tags";
+    const list = groups.get(group) ?? [];
+    const id = `${match[1]}:${decodeURIComponent(match[2])}`;
+    if (!list.some((tag) => tag.id === encodeId(id))) {
+      list.push({ id: encodeId(id), title: name });
+    }
+    groups.set(group, list);
+  }
+  const tagGroups: TagSection[] = [...groups].map(([group, tags]) => ({
+    id: group.toLowerCase(),
+    title: group,
+    tags,
+  }));
 
-  const chapterCount = $('a[href*="/read/"]').length;
+  const statusRaw = (info.get("publication status") ?? info.get("status") ?? "").toLowerCase();
+  const status = STATUS_LABELS[statusRaw] ?? (statusRaw ? capitalize(statusRaw) : undefined);
+
   const additionalInfo: Record<string, string> = {};
-  if (chapterCount > 0) {
-    additionalInfo["Chapters"] = String(chapterCount);
+  for (const [label, key] of [
+    ["Origin", "origin"],
+    ["Format", "publication format"],
+    ["Demographic", "demographic"],
+    ["Content rating", "content rating"],
+    ["Original language", "original language"],
+    ["First published", "first published"],
+    ["Color", "color"],
+    ["Chapters", "english"],
+  ] as const) {
+    const value = info.get(key);
+    if (value) additionalInfo[label] = value;
   }
 
   return {
     mangaId,
     mangaInfo: {
       primaryTitle: title,
-      secondaryTitles: [],
-      thumbnailUrl: absolute(meta("og:image")),
-      synopsis: (meta("og:description") ?? "").trim(),
-      contentRating: ContentRating.MATURE,
-      ...(statusText ? { status: STATUS_LABELS[statusText] ?? statusText } : {}),
-      ...(authors.length > 0 ? { author: authors.join(", ") } : {}),
-      ...(tags.length > 0 ? { tagGroups: [{ id: "genres", title: "Genres", tags }] } : {}),
-      ...(Object.keys(additionalInfo).length > 0 ? { additionalInfo } : {}),
-      shareUrl: `${DOMAIN}/manga/${mangaId}`,
+      secondaryTitles,
+      thumbnailUrl: coverUrl(mangaId),
+      synopsis,
+      contentRating: ratingOf(info.get("content rating"), synopsis),
+      shareUrl: `${DOMAIN}/title/${mangaId}`,
+      ...(status ? { status } : {}),
+      ...(authors.length ? { author: authors.join(", ") } : {}),
+      ...(artists.length ? { artist: artists.join(", ") } : {}),
+      ...(tagGroups.length ? { tagGroups } : {}),
+      ...(Object.keys(additionalInfo).length ? { additionalInfo } : {}),
     },
   };
 }
 
-function parseRelativeDate(text: string): Date | undefined {
-  const match = text.match(/(\d+)\s*(second|minute|hour|day|week|month|year)s?\s*ago/i);
-
-  if (!match) {
-    return undefined;
-  }
-
-  const amount = Number(match[1]);
-  const unitMs: Record<string, number> = {
-    second: 1000,
-    minute: 60_000,
-    hour: 3_600_000,
-    day: 86_400_000,
-    week: 604_800_000,
-    month: 2_592_000_000,
-    year: 31_536_000_000,
-  };
-
-  const ms = unitMs[match[2]!.toLowerCase()];
-  return ms ? new Date(Date.now() - amount * ms) : undefined;
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-// Rows print the page count as "21p".
-export function pageCountFromRow(text: string): number | undefined {
-  const match = text.match(/(\d+)\s*p\b/i);
-  return match ? Number(match[1]) : undefined;
-}
+export function parseChapters(
+  $: CheerioAPI,
+  sourceManga: SourceManga,
+): { chapters: Chapter[]; cursor?: string } {
+  const chapters: Chapter[] = [];
+  const section = $('section[aria-labelledby="chapters-heading"]');
 
-export function parseChapters($: CheerioAPI, sourceManga: SourceManga): Chapter[] {
-  const rows: { chapter: Chapter; pages?: number }[] = [];
-  const seen = new Set<string>();
-
-  for (const element of $('a[href*="/read/"]').toArray()) {
-    const anchor = $(element);
-    const chapterId = chapterIdFromHref(anchor.attr("href"));
-
-    if (!chapterId || seen.has(chapterId)) {
+  for (const element of section.find('a[href*="/read/"]').toArray()) {
+    const unit = $(element);
+    const chapterId = releaseFromHref(unit.attr("href"));
+    if (!chapterId || !unit.attr("data-unit")) {
       continue;
     }
 
-    const text = anchor.text().replace(/\s+/g, " ").trim();
-    const chapNum = Number(
-      text.match(/chapter\s*([\d.]+)/i)?.[1] ?? text.match(/^([\d.]+)\b/)?.[1] ?? 0,
-    );
-    const volume = text.match(/vol\.?\s*([\d.]+)/i)?.[1];
-    const published = parseRelativeDate(text);
-    const pages = pageCountFromRow(text);
+    const label = unit.attr("aria-label") ?? "";
+    const title = text(unit.find("[class*=unitTitle]").first());
+    const num = Number(/^\s*([\d.]+)\s*:/.exec(label)?.[1] ?? /([\d.]+)/.exec(title)?.[1]);
+    const when = unit.find("time").attr("datetime");
+    const date = when ? new Date(when) : undefined;
 
-    seen.add(chapterId);
-    rows.push({
-      chapter: {
-        chapterId,
-        sourceManga,
-        langCode: "en",
-        chapNum,
-        ...(volume ? { volume: Number(volume) } : {}),
-        ...(published ? { publishDate: published } : {}),
-        ...(pages ? { additionalInfo: { pages: String(pages) } } : {}),
-      },
-      ...(pages ? { pages } : {}),
+    chapters.push({
+      chapterId,
+      sourceManga,
+      langCode: "en",
+      chapNum: isNaN(num) ? 0 : num,
+      ...(title ? { title } : {}),
+      ...(date && !isNaN(date.getTime()) ? { publishDate: date } : {}),
     });
   }
 
-  const sorted = rows.sort((a, b) => b.chapter.chapNum - a.chapter.chapNum);
+  const next = section
+    .find('nav[aria-label="Chapter pages"] a, a[href*="cc="]')
+    .toArray()
+    .map((a) => $(a))
+    .find((a) => /next/i.test(text(a)) || /cc=/.test(a.attr("href") ?? ""));
 
-  return sorted.map((row, index) => ({ ...row.chapter, sortingIndex: sorted.length - index }));
+  return { chapters, cursor: cursorFromHref(next?.attr("href")) };
+}
+
+// The full page strip sits inside <noscript>, which cheerio keeps as text, so
+// the images are read off the raw markup. Each one is signed and short-lived.
+export function parsePages(html: string): string[] {
+  const pages = new Map<number, string>();
+  const re =
+    /<img\b[^>]*\bsrc="(https:\/\/media\.onisaga\.com\/api\/media\/[^"]+)"[^>]*\balt="Page (\d+) of \d+"/g;
+
+  for (const match of html.matchAll(re)) {
+    const url = (match[1] ?? "").replace(/&amp;/g, "&");
+    const n = Number(match[2]);
+    if (url && !isNaN(n) && !pages.has(n)) {
+      pages.set(n, url);
+    }
+  }
+
+  return [...pages].sort((a, b) => a[0] - b[0]).map(([, url]) => url);
 }
