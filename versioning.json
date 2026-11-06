@@ -1,5 +1,5 @@
 {
-  "buildTime": "2026-11-03T15:12:02.012Z",
+  "buildTime": "2026-11-06T04:42:39.573Z",
   "builtWith": {
     "toolchain": "1.0.0-alpha.92",
     "types": "1.0.0-alpha.92"
@@ -657,7 +657,7 @@
     {
       "name": "Webnex",
       "description": "Extension that pulls content from webnex.cc.",
-      "version": "1.0.0",
+      "version": "2.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "ADULT",
