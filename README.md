@@ -21,6 +21,7 @@ Paperback 0.9 extensions.
 - [Manga18Club](https://manga18.club)
 - [manga3asq](https://3asq.online) — Arabic
 - [MangaHub](https://mangahub.io)
+- [MangaK](https://mangak.io)
 - [ManhwaRead](https://manhwaread.com)
 - [ManhwaToon](https://www.manhwatoon.me)
 - [OniSaga](https://onisaga.com)
