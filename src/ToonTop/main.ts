@@ -443,14 +443,20 @@ class ToonTopExtension implements ExtensionImpl<typeof pbconfigType> {
   }
 }
 
-// `number` is usually present; fall back to the leading digits of the name.
-function chapterNumber(entry: { number?: number; name: string }): number {
-  if (typeof entry.number === "number" && !isNaN(entry.number)) {
-    return entry.number;
+// The feed's `number` is a running index (Chapter 126 is number 128 once the
+// .5 chapters and Chapter 0 are counted), so the number is read off the name.
+function chapterNumber(entry: { name: string; slug?: string }): number {
+  const fromName = /(\d+(?:\.\d+)?)/.exec(entry.name)?.[1];
+  if (fromName) {
+    return Number(fromName);
   }
 
-  const parsed = Number(/([\d.]+)/.exec(entry.name)?.[1]);
-  return isNaN(parsed) ? 0 : parsed;
+  const fromSlug = /chapter-(\d+)(?:-(\d+))?(?:$|-)/.exec(entry.slug ?? "")?.slice(1);
+  if (fromSlug?.[0]) {
+    return Number(fromSlug[1] ? `${fromSlug[0]}.${fromSlug[1]}` : fromSlug[0]);
+  }
+
+  return 0;
 }
 
 function scoreOf(item: ToonTopItem, by: keyof ToonTopStats | "rating"): number {
