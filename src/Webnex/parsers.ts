@@ -11,7 +11,7 @@ import {
 import type { Cheerio, CheerioAPI } from "cheerio";
 import type { Element } from "domhandler";
 
-import { DOMAIN, seriesUrl } from "./models";
+import { CHAPTERS_PER_PAGE, DOMAIN, seriesUrl } from "./models";
 
 // An empty imageUrl empties the whole row, so point coverless titles at a path
 // the host will not serve and let the app draw its placeholder.
@@ -284,11 +284,8 @@ export function parseChapterRows($: CheerioAPI): { rows: ChapterRow[]; total: nu
     const row = $(element);
     const field = (selector: string): Cheerio<Element> => $(resolved($, row, selector)).first();
     const chapterId = slugOf(field("a.ch-link").attr("href") ?? "");
-    const number = Number(
-      text(field("span.ch-num"))
-        .replace(/^chapter/i, "")
-        .trim(),
-    );
+    // The number sits behind a visual "Ch." and a screen-reader "Chapter" label.
+    const number = Number(/([\d.]+)\s*$/.exec(text(field("span.ch-num")))?.[1] ?? NaN);
 
     if (!chapterId || !Number.isFinite(number)) {
       continue;
@@ -310,7 +307,20 @@ export function parseChapterRows($: CheerioAPI): { rows: ChapterRow[]; total: nu
     });
   }
 
-  return { rows, total: Number(text($("span.chapters-count").first())) || rows.length };
+  // No total is printed any more; the pager's last page number says how many pages there are.
+  const section = $("section#chapters").first();
+  const lastPage = Math.max(
+    0,
+    ...resolved(
+      $,
+      section.length ? section : ($.root() as unknown as Cheerio<Element>),
+      "ol.pagination-pages li",
+    )
+      .map((li) => Number(text($(li))))
+      .filter((n) => Number.isFinite(n)),
+  );
+
+  return { rows, total: lastPage > 1 ? lastPage * CHAPTERS_PER_PAGE : rows.length };
 }
 
 export function parsePages(body: string): { pages: string[]; message?: string } {

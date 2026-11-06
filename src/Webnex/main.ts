@@ -129,9 +129,16 @@ class WebnexExtension implements ExtensionImpl<typeof pbconfig> {
   // chapter page sets, with that chapter page as referer.
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
     const chapterId = chapter.chapterId;
+    // The reader cookie is only issued to what looks like a page navigation.
     const [response] = await Application.scheduleRequest({
       url: readUrl(chapterId),
       method: "GET",
+      headers: {
+        accept: "text/html,application/xhtml+xml",
+        "sec-fetch-site": "none",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-dest": "document",
+      },
     });
     const cookie = Object.entries(response.headers ?? {})
       .filter(([name]) => name.toLowerCase() === "set-cookie")
