@@ -1,5 +1,5 @@
 {
-  "buildTime": "2026-11-06T04:42:39.573Z",
+  "buildTime": "2026-11-06T10:34:41.908Z",
   "builtWith": {
     "toolchain": "1.0.0-alpha.92",
     "types": "1.0.0-alpha.92"
@@ -399,6 +399,29 @@
         16
       ],
       "id": "MangaHub"
+    },
+    {
+      "name": "MangaK",
+      "description": "Extension that pulls content from mangak.io.",
+      "version": "1.0.0",
+      "icon": "icon.png",
+      "language": "en",
+      "contentRating": "ADULT",
+      "badges": [],
+      "developers": [
+        {
+          "name": "kittycatgit",
+          "website": "https://github.com/kittycatgit",
+          "github": "https://github.com/kittycatgit"
+        }
+      ],
+      "capabilities": [
+        1,
+        64,
+        4,
+        16
+      ],
+      "id": "MangaK"
     },
     {
       "name": "ManhwaRead",
