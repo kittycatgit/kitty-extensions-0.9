@@ -75,8 +75,27 @@ export function parseMangaDetails($: CheerioAPI, mangaId: string, domain: string
     $("meta[name='description']").attr("content")?.trim() ||
     "";
 
+  // Info rows are `div.item` pairs of `div.info_label` and `div.info_value`. Scoping
+  // to them matters: the nav menu on every page also links to every genre.
+  const infoValue = (label: string) =>
+    $("div.detail_listInfo div.item")
+      .filter((_, item) => $("div.info_label", item).text().trim().toLowerCase() === label)
+      .first()
+      .find("div.info_value");
+
+  const people = (label: string): string | undefined => {
+    const value = infoValue(label);
+    const links = $("a", value)
+      .toArray()
+      .map((element) => $(element).text().trim());
+    const names = (links.length ? links : [value.text().trim()]).filter(
+      (name) => name && !/^updating$/i.test(name),
+    );
+    return names.length ? names.join(", ") : undefined;
+  };
+
   const tags: Tag[] = [];
-  for (const element of $("a[href*='/manga-list/']").toArray()) {
+  for (const element of $("a[href*='/manga-list/']", infoValue("categories")).toArray()) {
     const id = $(element).attr("href")?.replace(/\/+$/, "").split("/").pop();
     const title = $(element).text().trim();
     if (id && title && !tags.some((tag) => tag.id === id)) {
@@ -85,47 +104,64 @@ export function parseMangaDetails($: CheerioAPI, mangaId: string, domain: string
   }
   const tagGroups: TagSection[] = tags.length ? [{ id: "genres", title: "Genres", tags }] : [];
 
-  const infoText = $("div.story_info, div.detail_item, ul.manga-info-text, div.mg_info")
-    .first()
-    .text();
-  const author = /Author\s*[:：]\s*([^\n]+)/i.exec(infoText)?.[1]?.trim();
-  const status = /Status\s*[:：]\s*([^\n]+)/i.exec(infoText)?.[1]?.trim();
+  // Commas also appear inside single names, so only the slash separates them.
+  const secondaryTitles = infoValue("other name")
+    .text()
+    .split(" / ")
+    .map((name) => name.trim())
+    .filter((name, index, names) => {
+      const key = name.toLowerCase();
+      return (
+        name &&
+        key !== primaryTitle.toLowerCase() &&
+        names.findIndex((other) => other.toLowerCase() === key) === index
+      );
+    });
+
+  const author = people("author");
+  const artist = people("artist");
+  const status = infoValue("status").text().trim() || undefined;
 
   return {
     mangaId,
     mangaInfo: {
       primaryTitle,
-      secondaryTitles: [],
+      secondaryTitles,
       thumbnailUrl,
       synopsis,
       contentRating: ContentRating.ADULT,
       shareUrl: `${domain}/manhwa/${mangaId}`,
       ...(author ? { author } : {}),
+      ...(artist ? { artist } : {}),
       ...(status ? { status } : {}),
       ...(tagGroups.length ? { tagGroups } : {}),
     },
   };
 }
 
-// The detail page carries the whole chapter list, newest first.
+// The detail page carries the whole chapter list, newest first. Chapter slugs are
+// not uniform within one title (`chapter-12`, `chap-152`, `chap-129-5`), so rows
+// are matched by their class, not by the slug.
 export function parseChapters($: CheerioAPI, sourceManga: SourceManga): Chapter[] {
   const chapters: Chapter[] = [];
   const seen = new Set<string>();
 
-  for (const element of $("a[href*='/chapter-']").toArray()) {
+  for (const element of $("a.chapter_num[href]").toArray()) {
     const href = $(element).attr("href")?.split("?")[0]?.replace(/\/+$/, "");
-    const chapterId = href?.split("/").pop();
-    if (!href || !chapterId || seen.has(chapterId) || !/chapter-/i.test(chapterId)) {
-      continue;
-    }
+    const parts = href?.split("/") ?? [];
+    const chapterId = parts.pop();
     // "Related" rails link to chapters of other titles.
-    if (slugFromUrl(href) !== sourceManga.mangaId) {
+    if (!href || !chapterId || seen.has(chapterId) || parts.pop() !== sourceManga.mangaId) {
       continue;
     }
     seen.add(chapterId);
 
     const title = $(element).text().trim();
-    const chapNum = Number(/chapter-([\d.]+)/i.exec(chapterId)?.[1] ?? NaN);
+    const slugNumber = /(\d+)(?:-(\d+))?$/.exec(chapterId);
+    const chapNum = Number(
+      /chapter\s+(\d+(?:\.\d+)?)/i.exec(title)?.[1] ??
+        (slugNumber ? `${slugNumber[1]}${slugNumber[2] ? `.${slugNumber[2]}` : ""}` : NaN),
+    );
 
     chapters.push({
       chapterId,
