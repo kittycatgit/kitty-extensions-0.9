@@ -465,6 +465,10 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
         title: TRENDING_SECTIONS[2]!.title,
         type: DiscoverSectionType.simpleCarousel,
       },
+      // The site's latest feed filtered by series type: the API's only other listing axis.
+      { id: "latest-manga", title: "Latest Manga", type: DiscoverSectionType.simpleCarousel },
+      { id: "latest-manhwa", title: "Latest Manhwa", type: DiscoverSectionType.simpleCarousel },
+      { id: "latest-manhua", title: "Latest Manhua", type: DiscoverSectionType.simpleCarousel },
       { id: GENRES_SECTION_ID, title: "Genres", type: DiscoverSectionType.genres },
     ];
   }
@@ -496,6 +500,10 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
 
     if (section.id === LATEST_SECTION_ID) {
       return await this.latestUpdates(page);
+    }
+    const latestType = /^latest-(manga|manhwa|manhua)$/.exec(section.id)?.[1];
+    if (latestType) {
+      return await this.latestUpdates(page, latestType, "simpleCarouselItem");
     }
 
     const trending = TRENDING_SECTIONS.find((entry) => entry.id === section.id);
@@ -538,12 +546,16 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
     };
   }
 
-  private async latestUpdates(page: number): Promise<PagedResults<DiscoverSectionItem>> {
+  private async latestUpdates(
+    page: number,
+    seriesType = "all",
+    kind: "chapterUpdatesCarouselItem" | "simpleCarouselItem" = "chapterUpdatesCarouselItem",
+  ): Promise<PagedResults<DiscoverSectionItem>> {
     const rows = await this.api.query<ApiLatestItem[]>("recommendations.latestChapters", {
       limit: LATEST_PAGE_SIZE,
       page,
       maxRating: MAX_RATING,
-      seriesType: "all",
+      seriesType,
     });
 
     const items: DiscoverSectionItem[] = [];
@@ -557,15 +569,24 @@ class HiperDexExtension implements ExtensionImpl<typeof pbconfigType> {
 
       const published = newest.createdAt ? new Date(newest.createdAt) : undefined;
 
-      items.push({
-        type: "chapterUpdatesCarouselItem",
+      const base = {
         mangaId: row.seriesSlug,
-        chapterId: String(newest.number),
         imageUrl: row.seriesCoverUrl || FALLBACK_COVER,
         title: row.seriesTitle?.trim() || row.seriesSlug,
         subtitle: `Chapter ${newest.number}`,
-        ...(published && !Number.isNaN(published.getTime()) ? { publishDate: published } : {}),
-      });
+      };
+      items.push(
+        kind === "simpleCarouselItem"
+          ? { type: "simpleCarouselItem", ...base }
+          : {
+              type: "chapterUpdatesCarouselItem",
+              ...base,
+              chapterId: String(newest.number),
+              ...(published && !Number.isNaN(published.getTime())
+                ? { publishDate: published }
+                : {}),
+            },
+      );
     }
 
     return {

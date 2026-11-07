@@ -71,32 +71,20 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
     this.mainInterceptor.registerInterceptor(); // last, so its headers are what goes out
   }
 
+  // Every block of the site's home page in the site's order, plus the directory's completed view and the genres grid.
+  // Text-only home blocks (ranking, trending) have no covers there, so those rails come from their own listing pages.
   async getDiscoverSections(): Promise<DiscoverSection[]> {
-    const get_Hot_Release: DiscoverSection = {
-      id: "hot-release",
-      title: "Hot Release",
-      type: DiscoverSectionType.featured,
-    };
-
-    const get_New_Manga: DiscoverSection = {
-      id: "new-manga",
-      title: "New Manga",
-      type: DiscoverSectionType.prominentCarousel,
-    };
-
-    const get_Latest_Updates: DiscoverSection = {
-      id: "latest-updates",
-      title: "Latest Updates",
-      type: DiscoverSectionType.simpleCarousel,
-    };
-
-    const get_Genre_Section: DiscoverSection = {
-      id: "get-genre-section",
-      title: "Genres",
-      type: DiscoverSectionType.genres,
-    };
-
-    return [get_Hot_Release, get_New_Manga, get_Latest_Updates, get_Genre_Section];
+    return [
+      { id: "hot-release", title: "Hot Manga Releases", type: DiscoverSectionType.featured },
+      { id: "being-read", title: "Being Read Right Now", type: DiscoverSectionType.simpleCarousel },
+      { id: "ranking", title: "Popular Manga Ranking", type: DiscoverSectionType.simpleCarousel },
+      { id: "recommended", title: "Recommended", type: DiscoverSectionType.simpleCarousel },
+      { id: "new-manga", title: "New Manga Release", type: DiscoverSectionType.prominentCarousel },
+      { id: "latest-updates", title: "Latest Updates", type: DiscoverSectionType.simpleCarousel },
+      { id: "trending", title: "Trending Manga", type: DiscoverSectionType.simpleCarousel },
+      { id: "completed", title: "Completed", type: DiscoverSectionType.simpleCarousel },
+      { id: "get-genre-section", title: "Genres", type: DiscoverSectionType.genres },
+    ];
   }
 
   // Populates both the discover sections
@@ -106,9 +94,28 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
   ): Promise<PagedResults<DiscoverSectionItem>> {
     switch (section.id) {
       case "hot-release":
-        return this.getHotRelease(metadata);
+        return this.homeBlock("Hot Manga Releases", "featuredCarouselItem");
+      case "being-read":
+        return this.homeBlock("Being Read Right Now");
+      case "recommended":
+        return this.homeBlock("Recommended");
+      case "ranking":
+        return this.listPage(() => `${DOMAIN}/ranking/`, metadata, false);
+      case "trending":
+        return this.listPage(() => `${DOMAIN}/trending/`, metadata, false);
       case "new-manga":
-        return this.getNewManga(section, metadata);
+        return this.listPage(
+          (n) => (n > 1 ? `${DOMAIN}/directory/${n}.html?news` : `${DOMAIN}/directory/?news`),
+          metadata,
+          true,
+        );
+      case "completed":
+        return this.listPage(
+          (n) =>
+            n > 1 ? `${DOMAIN}/directory/${n}.html?complete` : `${DOMAIN}/directory/?complete`,
+          metadata,
+          true,
+        );
       case "latest-updates":
         return this.getLatestUpdates(section, metadata);
       case "get-genre-section":
@@ -134,129 +141,79 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
     }
   }
 
-  async getHotRelease(
-    metadata: { page?: number; collectedIds?: string[] } | undefined,
-  ): Promise<PagedResults<DiscoverSectionItem>> {
+  // Cover tiles of a listing (home blocks, /hot/, /ranking/, /trending/, /directory/): list-1 and list-3 share the item markup.
+  private tiles(
+    $: CheerioAPI,
+    root: unknown,
+    kind: "simpleCarouselItem" | "featuredCarouselItem" = "simpleCarouselItem",
+  ): DiscoverSectionItem[] {
     const items: DiscoverSectionItem[] = [];
-    const collectedIds = metadata?.collectedIds ?? [];
-
-    const request = {
-      url: DOMAIN,
-      method: "GET",
-    };
-
-    const $ = await this.fetchCheerio(request);
-
-    $("div.manga-list-1 ul.manga-list-1-list li").each((_, element) => {
+    const seen = new Set<string>();
+    $("ul.manga-list-1-list > li, ul.manga-list-3-list > li", root as string).each((_, element) => {
       const unit = $(element);
       const mangaLink = $('a[href^="/manga/"]', unit).first();
       const mangaId = mangaLink.attr("href")?.split("/manga/")[1]?.replace(/\//g, "") || "";
       const image = httpsUrl($("img.manga-list-1-cover", unit).attr("src"));
       const title = mangaLink.attr("title")?.trim() ?? "";
       const subtitle = $("p.manga-list-1-item-subtitle", unit).text().trim();
-
       const safeId = decodeURIComponent(mangaId)
         .replace(/[^\w@.]/g, "_")
         .trim();
-
-      if (safeId && title && image && !collectedIds.includes(safeId)) {
-        collectedIds.push(safeId);
-        items.push(
-          createDiscoverSectionItem({
-            id: safeId,
-            image: image,
-            title: title,
-            subtitle: subtitle,
-            type: "simpleCarouselItem",
-          }),
-        );
-      }
+      if (!safeId || !title || !image || seen.has(safeId)) return;
+      seen.add(safeId);
+      items.push(
+        kind === "featuredCarouselItem"
+          ? {
+              type: "featuredCarouselItem",
+              mangaId: safeId,
+              imageUrl: image,
+              title,
+              ...(subtitle ? { supertitle: subtitle } : {}),
+            }
+          : createDiscoverSectionItem({
+              id: safeId,
+              image,
+              title,
+              subtitle,
+              type: "simpleCarouselItem",
+            }),
+      );
     });
-
-    return {
-      items: items,
-      metadata: undefined,
-    };
+    return items;
   }
 
-  async getNewManga(
-    section: DiscoverSection,
-    metadata: { page?: number; collectedIds?: string[] } | undefined,
+  // The home page block with this heading.
+  private async homeBlock(
+    heading: string,
+    kind: "simpleCarouselItem" | "featuredCarouselItem" = "simpleCarouselItem",
   ): Promise<PagedResults<DiscoverSectionItem>> {
-    const items: DiscoverSectionItem[] = [];
-    const collectedIds = metadata?.collectedIds ?? [];
+    const $ = await this.fetchCheerio({ url: `${DOMAIN}/`, method: "GET" });
+    const block = $("div.manga-list-1, div.manga-list-3")
+      .filter((_, element) =>
+        $("div.manga-list-1-title, div.manga-list-3-title", element)
+          .first()
+          .text()
+          .includes(heading),
+      )
+      .first();
+    return { items: this.tiles($, block, kind), metadata: undefined };
+  }
+
+  // A listing page; paged ones advance while the pager's ">" link points at a real page.
+  private async listPage(
+    urlFor: (page: number) => string,
+    metadata: Metadata | undefined,
+    paged: boolean,
+  ): Promise<PagedResults<DiscoverSectionItem>> {
     const page = (metadata as { page?: number } | undefined)?.page ?? 1;
-
-    // Build the URL with proper pagination
-    const urlBuilder = new URL(DOMAIN).addPathComponent("directory");
-
-    if (page > 1) {
-      urlBuilder.addPathComponent(`${page}.html?news`);
-    } else {
-      urlBuilder.addPathComponent("?news");
-    }
-
-    const request = {
-      url: urlBuilder.toString(),
-      method: "GET",
-    };
-
-    const $ = await this.fetchCheerio(request);
-
-    // Process manga items - keeping this part unchanged
-    $("div.manga-list-1 ul.manga-list-1-list li").each((_, element) => {
-      const unit = $(element);
-
-      const mangaLink = $('a[href^="/manga/"]', unit).first();
-      const mangaId = mangaLink.attr("href")?.split("/manga/")[1]?.replace(/\//g, "") || "";
-      const image = httpsUrl($("img.manga-list-1-cover", unit).attr("src"));
-      const title = mangaLink.attr("title")?.trim() ?? "";
-      const subtitle = $("ul.manga-list-4-item-part > li", unit).text().trim();
-
-      const safeId = decodeURIComponent(mangaId)
-        .replace(/[^\w@.]/g, "_")
-        .trim();
-
-      if (safeId && title && image && !collectedIds.includes(safeId)) {
-        collectedIds.push(safeId);
-        items.push(
-          createDiscoverSectionItem({
-            id: safeId,
-            image: image,
-            title: title,
-            subtitle: subtitle,
-            type: "simpleCarouselItem",
-          }),
-        );
-      }
-    });
-
-    // Improved pagination detection based on the provided HTML
-    let nextPage: number | undefined;
-
-    // Look for the ">" link which indicates next page is available
-    const nextPageLink = $(".pager-list-left a").filter(function () {
-      return $(this).text() === ">";
-    });
-
-    if (nextPageLink.length > 0) {
-      const nextPageHref = nextPageLink.attr("href");
-      if (nextPageHref) {
-        // Extract page number from href format like "/directory/2.html?news"
-        const pageMatch = nextPageHref.match(/\/directory\/(\d+)\.html/);
-        if (pageMatch && pageMatch[1]) {
-          nextPage = parseInt(pageMatch[1], 10);
-        } else {
-          // Fallback - increment current page
-          nextPage = page + 1;
-        }
-      }
-    }
-
-    return {
-      items: items,
-      metadata: nextPage ? { page: nextPage, collectedIds } : undefined,
-    };
+    const $ = await this.fetchCheerio({ url: urlFor(page), method: "GET" });
+    const items = this.tiles($, $.root());
+    const more =
+      paged &&
+      $(".pager-list-left a")
+        .toArray()
+        .some((a) => $(a).text().trim() === ">" && ($(a).attr("href") ?? "").startsWith("/"));
+    return { items, metadata: more && items.length > 0 ? { page: page + 1 } : undefined };
   }
 
   async getLatestUpdates(
