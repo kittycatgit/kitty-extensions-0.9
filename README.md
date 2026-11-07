@@ -23,6 +23,7 @@ Paperback 0.9 extensions.
 - [Manga18Club](https://manga18.club)
 - [manga3asq](https://3asq.online) — Arabic
 - [Mangaball](https://mangaball.net) — 18+
+- [MangaFox](https://fanfox.net)
 - [MangaHub](https://mangahub.io)
 - [MangaK](https://mangak.io)
 - [ManhwaRead](https://manhwaread.com)
@@ -53,4 +54,4 @@ Or open [this link](paperback://addRepo?url=https%3A%2F%2Fkittycatgit.github.io%
 
 ## Credits
 
-Elftoon, Hentai2read, Mangaball and ScribbleHub started from Karrot's [KakarotExtension](https://github.com/karrot0/KakarotExtension) sources (MIT; Mangaball carries Inkdex's GPL-3.0 header) and are maintained here since November 2026.
+MangaFox started from Egwau's source in Inkdex's [general-extensions](https://github.com/inkdex/general-extensions) (GPL-3.0). Elftoon, Hentai2read, Mangaball and ScribbleHub started from Karrot's [KakarotExtension](https://github.com/karrot0/KakarotExtension) sources (MIT; Mangaball carries Inkdex's GPL-3.0 header) and are maintained here since November 2026.
