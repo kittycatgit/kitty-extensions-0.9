@@ -9,9 +9,11 @@ Paperback 0.9 extensions.
 - [DankeFursLesen](https://danke.moe)
 - [DivaScans](https://divascans.org) — comics and novels
 - [DivineDaoLibrary](https://www.divinedaolibrary.com) — novels
+- [Elftoon](https://elftoon.com)
 - [ExiledRebels](https://exiledrebelsscanlations.com) — novels
 - [FanFiction](https://www.fanfiction.net) — novels
 - [Foxaholic](https://www.foxaholic.com) — novels
+- [Hentai2read](https://hentai2read.com) — 18+
 - [HiperDex](https://hiperdex.tv)
 - [Kavita](https://www.kavitareader.com) — your own server
 - [Kayn Scan](https://kaynscans.com)
@@ -20,12 +22,14 @@ Paperback 0.9 extensions.
 - [LGBToon](https://lgbtoon.com) — BL/GL
 - [Manga18Club](https://manga18.club)
 - [manga3asq](https://3asq.online) — Arabic
+- [Mangaball](https://mangaball.net) — 18+
 - [MangaHub](https://mangahub.io)
 - [MangaK](https://mangak.io)
 - [ManhwaRead](https://manhwaread.com)
 - [ManhwaToon](https://www.manhwatoon.me)
 - [OniSaga](https://onisaga.com)
 - [SanaScans](https://sanascans.com)
+- [ScribbleHub](https://www.scribblehub.com) — novels
 - [ScytheScans](https://scythescans.com)
 - [SilentQuill](https://www.silentquill.net)
 - [SirenScans](https://sirenscans.org)
@@ -46,3 +50,7 @@ https://kittycatgit.github.io/kitty-extensions-0.9
 ```
 
 Or open [this link](paperback://addRepo?url=https%3A%2F%2Fkittycatgit.github.io%2Fkitty-extensions-0.9) on your device.
+
+## Credits
+
+Elftoon, Hentai2read, Mangaball and ScribbleHub started from Karrot's [KakarotExtension](https://github.com/karrot0/KakarotExtension) sources (MIT; Mangaball carries Inkdex's GPL-3.0 header) and are maintained here since November 2026.

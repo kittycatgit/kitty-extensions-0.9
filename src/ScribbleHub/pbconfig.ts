@@ -1,0 +1,21 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright © 2026 kittycatgit */
+
+import { ContentRating, SourceIntents, type ExtensionInfo } from "@paperback/types";
+
+export default {
+  name: "ScribbleHub",
+  description: "Original web novels from scribblehub.com.",
+  version: "2.0.0",
+  icon: "icon.png",
+  language: "en",
+  contentRating: ContentRating.ADULT,
+  capabilities: [
+    SourceIntents.DISCOVER_SECTION_PROVIDING,
+    SourceIntents.SEARCH_RESULT_PROVIDING,
+    SourceIntents.CHAPTER_PROVIDING,
+    SourceIntents.CLOUDFLARE_BYPASS_PROVIDING,
+  ],
+  badges: [],
+  developers: [{ name: "kittycatgit" }],
+} satisfies ExtensionInfo;
