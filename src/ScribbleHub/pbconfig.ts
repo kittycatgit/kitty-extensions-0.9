@@ -6,7 +6,7 @@ import { ContentRating, SourceIntents, type ExtensionInfo } from "@paperback/typ
 export default {
   name: "ScribbleHub",
   description: "Original web novels from scribblehub.com.",
-  version: "2.0.0",
+  version: "3.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.ADULT,
