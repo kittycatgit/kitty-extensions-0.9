@@ -1,5 +1,5 @@
 {
-  "buildTime": "2026-11-07T02:35:24.930Z",
+  "buildTime": "2026-11-07T09:31:15.214Z",
   "builtWith": {
     "toolchain": "1.0.0-alpha.92",
     "types": "1.0.0-alpha.92"
@@ -149,6 +149,27 @@
       "id": "DivineDaoLibrary"
     },
     {
+      "name": "Elftoon",
+      "description": "Extension that pulls content from elftoon.net.",
+      "version": "2.0.0",
+      "icon": "icon.png",
+      "language": "en",
+      "contentRating": "MATURE",
+      "badges": [],
+      "developers": [
+        {
+          "name": "kittycatgit"
+        }
+      ],
+      "capabilities": [
+        4,
+        64,
+        1,
+        16
+      ],
+      "id": "Elftoon"
+    },
+    {
       "name": "ExiledRebels",
       "description": "Extension that pulls novels from exiledrebelsscanlations.com.",
       "version": "7.0.0",
@@ -215,6 +236,27 @@
         16
       ],
       "id": "Foxaholic"
+    },
+    {
+      "name": "Hentai2read",
+      "description": "Extension that pulls content from hentai2read.com.",
+      "version": "2.0.0",
+      "icon": "icon.png",
+      "language": "en",
+      "contentRating": "ADULT",
+      "badges": [],
+      "developers": [
+        {
+          "name": "kittycatgit"
+        }
+      ],
+      "capabilities": [
+        1,
+        64,
+        4,
+        16
+      ],
+      "id": "Hentai2read"
     },
     {
       "name": "HiperDex",
@@ -424,6 +466,28 @@
       "id": "MangaK"
     },
     {
+      "name": "Mangaball",
+      "description": "Extension that pulls content from mangaball.com.",
+      "version": "2.0.0",
+      "icon": "icon.png",
+      "language": "multi",
+      "contentRating": "ADULT",
+      "capabilities": [
+        1,
+        4,
+        64,
+        16,
+        32
+      ],
+      "badges": [],
+      "developers": [
+        {
+          "name": "kittycatgit"
+        }
+      ],
+      "id": "Mangaball"
+    },
+    {
       "name": "ManhwaRead",
       "description": "Extension that pulls content from manhwaread.com.",
       "version": "7.0.0",
@@ -514,6 +578,27 @@
         16
       ],
       "id": "SanaScans"
+    },
+    {
+      "name": "ScribbleHub",
+      "description": "Original web novels from scribblehub.com.",
+      "version": "2.0.0",
+      "icon": "icon.png",
+      "language": "en",
+      "contentRating": "ADULT",
+      "capabilities": [
+        4,
+        64,
+        1,
+        16
+      ],
+      "badges": [],
+      "developers": [
+        {
+          "name": "kittycatgit"
+        }
+      ],
+      "id": "ScribbleHub"
     },
     {
       "name": "ScytheScans",
