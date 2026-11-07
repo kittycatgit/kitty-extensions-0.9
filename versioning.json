@@ -1,5 +1,5 @@
 {
-  "buildTime": "2026-11-07T10:05:11.696Z",
+  "buildTime": "2026-11-07T10:19:26.308Z",
   "builtWith": {
     "toolchain": "1.0.0-alpha.92",
     "types": "1.0.0-alpha.92"
@@ -582,7 +582,7 @@
     {
       "name": "ScribbleHub",
       "description": "Original web novels from scribblehub.com.",
-      "version": "4.0.0",
+      "version": "5.0.0",
       "icon": "icon.png",
       "language": "en",
       "contentRating": "ADULT",
