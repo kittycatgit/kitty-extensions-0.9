@@ -47,10 +47,10 @@ Paperback 0.9 extensions.
 Add this URL in Paperback under Settings → Extensions:
 
 ```
-https://kittycatgit.github.io/kitty-extensions-0.9
+https://paperback.samipmainali.dev/kitty
 ```
 
-Or open [this link](paperback://addRepo?url=https%3A%2F%2Fkittycatgit.github.io%2Fkitty-extensions-0.9) on your device.
+Or open [this link](paperback://addRepo?url=https%3A%2F%2Fpaperback.samipmainali.dev%2Fkitty) on your device.
 
 ## Credits
 
