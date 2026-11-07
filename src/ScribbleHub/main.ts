@@ -325,35 +325,9 @@ class ScribbleHubExtension implements ExtensionImpl<typeof pbconfigType> {
   }
 
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
-    const url = `${DOMAIN}/${chapter.chapterId}/`;
-    // The site's firewall serves chapter pages to page navigations only: a plain request gets a 403 even with a valid
-    // clearance. A same-origin frame inside the WebView is a navigation, so the chapter is read from there.
-    const { result } = await Application.executeInWebView({
-      source: {
-        baseUrl: url,
-        html: "<!DOCTYPE html><html><head></head><body></body></html>",
-        loadCSS: false,
-        loadImages: false,
-        userAgent: await Application.getDefaultUserAgent(),
-      },
-      inject: `return new Promise((resolve) => {
-        const frame = document.createElement("iframe");
-        frame.style.cssText = "position:fixed;left:0;top:0;width:900px;height:600px;opacity:0";
-        const done = (value) => { frame.remove(); resolve(value); };
-        frame.addEventListener("load", () => {
-          try { const raw = frame.contentDocument && frame.contentDocument.querySelector("#chp_raw"); done(raw ? raw.innerHTML : null); }
-          catch (e) { done(null); }
-        }, { once: true });
-        setTimeout(() => done(null), 30000);
-        frame.src = ${JSON.stringify(url)};
-        document.body.appendChild(frame);
-      });`,
-      storage: { cookies: this.cookieStorage.cookiesForUrl(url) },
-    });
-    if (typeof result !== "string" || !result.trim()) {
-      throw new Error(`ScribbleHub: the chapter page did not load (${url})`);
-    }
-    const $ = cheerio.load(`<div id="chp_raw">${result}</div>`);
+    // Chapter pages sit behind their own Cloudflare check, separate from the site's front page: the interceptor
+    // points the bypass at the chapter URL itself, so the app solves that one and the retry reads the chapter.
+    const $ = await this.document(`${DOMAIN}/${chapter.chapterId}/`);
 
     return {
       id: chapter.chapterId,

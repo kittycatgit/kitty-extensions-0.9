@@ -39,9 +39,11 @@ export class ScribbleHubInterceptor extends PaperbackInterceptor {
         /challenge-platform|Attention Required|Just a moment|cf-error/i.test(body));
 
     if (challenged) {
+      // Chapter pages (/read/…) carry a check of their own that the front page's clearance does not cover, so the bypass
+      // opens the chapter page itself; everything else shares one canonical URL so concurrent failures coalesce.
       throw new CloudflareError(
         {
-          url: this.domain,
+          url: /\/read\//.test(request.url) ? request.url : this.domain,
           method: "GET",
           headers: {
             referer: `${this.domain}/`,
