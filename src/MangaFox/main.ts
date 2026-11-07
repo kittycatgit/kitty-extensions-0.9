@@ -501,7 +501,8 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
   // Populates the title details
   async getMangaDetails(mangaId: string): Promise<SourceManga> {
     const request = {
-      url: new URL(DOMAIN).addPathComponent("manga").addPathComponent(mangaId).toString(),
+      // With the trailing slash: without it the site 301s to plain http, which iOS refuses (ATS).
+      url: `${new URL(DOMAIN).addPathComponent("manga").addPathComponent(mangaId).toString()}/`,
       method: "GET",
     };
 
@@ -593,10 +594,7 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
   // Populates the chapter list
   async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
     const request = {
-      url: new URL(DOMAIN)
-        .addPathComponent("manga")
-        .addPathComponent(sourceManga.mangaId)
-        .toString(),
+      url: `${new URL(DOMAIN).addPathComponent("manga").addPathComponent(sourceManga.mangaId).toString()}/`,
       method: "GET",
     };
 
@@ -640,11 +638,7 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
     console.log(`Fetching chapter details for ${chapter.chapterId}`);
 
     const request = {
-      url: new URL(DOMAIN)
-        .addPathComponent("manga")
-        .addPathComponent(chapter.sourceManga.mangaId)
-        .addPathComponent(chapter.chapterId)
-        .toString(),
+      url: `${new URL(DOMAIN).addPathComponent("manga").addPathComponent(chapter.sourceManga.mangaId).addPathComponent(chapter.chapterId).toString()}/`,
       method: "GET",
     };
 
