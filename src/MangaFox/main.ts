@@ -40,7 +40,7 @@ import { type CheerioAPI } from "cheerio";
 
 import { genreOptions } from "./genreOptions";
 import { genres } from "./genres";
-import { DOMAIN, type Metadata } from "./models";
+import { DOMAIN, MOBILE_DOMAIN, type Metadata } from "./models";
 
 // Covers come as plain http (or protocol-relative) from the markup; the app refuses plain http (ATS) and the CDN serves https.
 const httpsUrl = (u: string | undefined): string =>
@@ -633,197 +633,30 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
     return chapters.reverse();
   }
 
+  // The mobile "roll" reader lists every page of a chapter in one document (data-original on each img), where the
+  // desktop reader hands out two pages per scripted request: one request instead of a dozen, and no key dance.
+  // The desktop's page count is one higher than the image count: its last "page" is the end-of-chapter screen.
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
-    console.log(`Fetching chapter details for ${chapter.chapterId}`);
-
-    const request = {
-      url: `${new URL(DOMAIN).addPathComponent("manga").addPathComponent(chapter.sourceManga.mangaId).addPathComponent(chapter.chapterId).toString()}/`,
+    const $ = await this.fetchCheerio({
+      url: `${MOBILE_DOMAIN}/roll_manga/${chapter.sourceManga.mangaId}/${chapter.chapterId}/1.html`,
       method: "GET",
-    };
-
-    try {
-      const $ = await this.fetchCheerio(request);
-      const pages: string[] = [];
-
-      // Check if it's a webtoon-style chapter with chapter_bar
-      const isWebtoon = $("script[src*=chapter_bar]").length > 0;
-
-      if (isWebtoon) {
-        // Handle webtoon format
-        const script = $("script:contains(function(p,a,c,k,e,d))").html()?.replace("eval", "");
-        if (script) {
-          const deobfuscatedScript = (
-            (0, eval)(script) as unknown as { toString(): string }
-          ).toString();
-          const urlsMatch = deobfuscatedScript.match(/newImgs=\['(.+?)'\]/);
-          if (urlsMatch && urlsMatch[1]) {
-            const urls = urlsMatch[1].split("','");
-            for (const url of urls) {
-              pages.push("https:" + url.replace("'", ""));
-            }
-          }
-        }
-      } else {
-        // Handle regular manga format
-        const script = $("script:contains(function(p,a,c,k,e,d))").html()?.replace("eval", "");
-        if (script) {
-          const deobfuscatedScript = (
-            (0, eval)(script) as unknown as { toString(): string }
-          ).toString();
-
-          // Extract secret key
-          const secretKeyStart = deobfuscatedScript.indexOf("'");
-          const secretKeyEnd = deobfuscatedScript.indexOf(";");
-          const secretKeyResultScript = deobfuscatedScript
-            .substring(secretKeyStart, secretKeyEnd)
-            .trim();
-          let secretKey = "";
-          try {
-            secretKey = (
-              (0, eval)(secretKeyResultScript) as unknown as {
-                toString(): string;
-              }
-            ).toString();
-          } catch (e) {
-            console.error("Error extracting secret key:", e);
-          }
-
-          // Find chapter ID
-          const chapterIdStartLoc = $.html().indexOf("chapterid");
-          if (chapterIdStartLoc > -1) {
-            const numericChapterId = $.html()
-              .substring(chapterIdStartLoc + 11, $.html().indexOf(";", chapterIdStartLoc))
-              .trim();
-
-            // Find number of pages
-            const pagesLinksElements = $("a", $(".pager-list-left > span").first());
-            const pagesNumber =
-              Number($(pagesLinksElements[pagesLinksElements.length - 2])?.attr("data-page")) || 0;
-
-            if (pagesNumber > 0) {
-              const pageBase = request.url.substring(0, request.url.lastIndexOf("/"));
-
-              // Fetch each page
-              for (let i = 1; i <= pagesNumber; i++) {
-                let responseString = "";
-
-                // Try up to 3 times to get the page
-                for (let tr = 1; tr <= 3; tr++) {
-                  const pageRequest = {
-                    url: `${pageBase}/chapterfun.ashx?cid=${numericChapterId}&page=${i}&key=${secretKey}`,
-                    method: "GET",
-                    headers: {
-                      Referer: request.url,
-                      Accept: "*/*",
-                      "Accept-Language": "en-US,en;q=0.9",
-                      Connection: "keep-alive",
-                      "X-Requested-With": "XMLHttpRequest",
-                    },
-                  };
-
-                  try {
-                    const [_, buffer] = await Application.scheduleRequest(pageRequest);
-                    responseString = Application.arrayBufferToUTF8String(buffer);
-                    if (responseString) {
-                      secretKey = ""; // Clear key after successful request
-                      break;
-                    }
-                  } catch (err) {
-                    console.error(`Error on attempt ${tr} for page ${i}:`, err);
-                    // Continue to next attempt
-                  }
-                }
-
-                if (responseString) {
-                  try {
-                    const deobfuscatedPageScript = (
-                      (0, eval)(responseString.replace("eval", "")) as unknown as {
-                        toString(): string;
-                      }
-                    ).toString();
-
-                    // Extract base link and image link
-                    const baseLinkStartPos = deobfuscatedPageScript.indexOf("pix=") + 5;
-                    const baseLink = deobfuscatedPageScript.substring(
-                      baseLinkStartPos,
-                      deobfuscatedPageScript.indexOf(";", baseLinkStartPos) - 1,
-                    );
-
-                    const imageLinkStartPos = deobfuscatedPageScript.indexOf("pvalue=") + 9;
-                    const imageLinkEndPos = deobfuscatedPageScript.indexOf('"', imageLinkStartPos);
-                    const imageLink = deobfuscatedPageScript.substring(
-                      imageLinkStartPos,
-                      imageLinkEndPos,
-                    );
-
-                    pages.push(`https:${baseLink}${imageLink}`);
-                  } catch (e) {
-                    console.error(`Error processing page ${i}:`, e);
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // Alternative extraction method in case the above methods fail
-      if (pages.length === 0) {
-        // Try to find images directly in the HTML
-        $("img.img-fluid").each((_, element) => {
-          const src = $(element).attr("src");
-          if (src && src.length > 0) {
-            pages.push(src);
-          }
-        });
-
-        // Or check for JSON data in script tags
-        $("script:not([src])").each((_, element) => {
-          const scriptText = $(element).html() || "";
-          if (scriptText.includes('"images"') || scriptText.includes('"pages"')) {
-            try {
-              const match = scriptText.match(/(\{.*"images":\s*\[.*\].*\})/);
-              if (match && match[1]) {
-                interface ChapterImagesJson {
-                  images: Array<string | string[]>;
-                }
-                const json = JSON.parse(match[1]) as ChapterImagesJson;
-                if (json.images && Array.isArray(json.images)) {
-                  json.images.forEach((img: string | string[]) => {
-                    if (typeof img === "string") {
-                      pages.push(img);
-                    } else if (Array.isArray(img) && img.length > 0) {
-                      pages.push(img[0]);
-                    }
-                  });
-                }
-              }
-            } catch (e) {
-              console.error("Error parsing JSON from script:", e);
-            }
-          }
-        });
-      }
-
-      if (pages.length === 0) {
-        throw new Error("No images found for this chapter");
-      }
-
-      console.log(`Successfully extracted ${pages.length} pages`);
-
-      return {
-        id: chapter.chapterId,
-        mangaId: chapter.sourceManga.mangaId,
-        pages: pages,
-      };
-    } catch (error) {
-      console.error(
-        `Failed to get chapter details: ${error instanceof Error ? error.message : String(error)}`,
-      );
+    });
+    const pages: string[] = [];
+    $("img[data-original], .reader-main img, #viewer img").each((_, el) => {
+      const src = httpsUrl($(el).attr("data-original") ?? $(el).attr("src"));
+      if (/\/store\/manga\//.test(src) && !pages.includes(src)) pages.push(src);
+    });
+    if (pages.length === 0) {
       throw new Error(
-        `Failed to load chapter: ${error instanceof Error ? error.message : String(error)}`,
+        `MangaFox: no pages found for ${chapter.sourceManga.mangaId}/${chapter.chapterId}`,
       );
     }
+
+    return {
+      id: chapter.chapterId,
+      mangaId: chapter.sourceManga.mangaId,
+      pages,
+    };
   }
 
   async fetchCheerio(request: Request): Promise<CheerioAPI> {
