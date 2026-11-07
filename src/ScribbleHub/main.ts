@@ -288,22 +288,14 @@ class ScribbleHubExtension implements ExtensionImpl<typeof pbconfigType> {
     };
   }
 
-  // The TOC is served 15 rows per ajax page, newest first; an empty page ends it.
+  // The series page pages its own table of contents with ?toc=N, 15 rows a page, newest first; the admin-ajax POST the
+  // site's scripts use is refused to the app by the firewall, so the pages are read as the plain GETs a browser makes.
   async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
-    const postId = sourceManga.mangaId.split("/")[0];
     const rows: ChapterRow[] = [];
 
     for (let page = 1; ; page++) {
-      const html = await this.request({
-        url: `${DOMAIN}/wp-admin/admin-ajax.php`,
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded",
-          "x-requested-with": "XMLHttpRequest",
-        },
-        body: `action=wi_getreleases_pagination&mypostid=${postId}&pagenum=${page}`,
-      });
-      const batch = parseChapterRows(cheerio.load(html));
+      const $ = await this.document(`${DOMAIN}/series/${sourceManga.mangaId}/?toc=${page}`);
+      const batch = parseChapterRows($);
       if (batch.length === 0 || rows.some((row) => row.id === batch[0]!.id)) break;
       rows.push(...batch);
     }
@@ -325,9 +317,35 @@ class ScribbleHubExtension implements ExtensionImpl<typeof pbconfigType> {
   }
 
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
-    // Chapter pages sit behind their own Cloudflare check, separate from the site's front page: the interceptor
-    // points the bypass at the chapter URL itself, so the app solves that one and the retry reads the chapter.
-    const $ = await this.document(`${DOMAIN}/${chapter.chapterId}/`);
+    const url = `${DOMAIN}/${chapter.chapterId}/`;
+    // The firewall serves chapter pages to page navigations only (a plain request gets a 403 block page with nothing to
+    // solve). A same-origin frame inside the app's WebView is a navigation, so the chapter is read from there.
+    const { result } = await Application.executeInWebView({
+      source: {
+        baseUrl: url,
+        html: "<!DOCTYPE html><html><head></head><body></body></html>",
+        loadCSS: false,
+        loadImages: false,
+        userAgent: await Application.getDefaultUserAgent(),
+      },
+      inject: `return new Promise((resolve) => {
+        const frame = document.createElement("iframe");
+        frame.style.cssText = "position:fixed;left:0;top:0;width:900px;height:600px;opacity:0";
+        const done = (value) => { frame.remove(); resolve(value); };
+        frame.addEventListener("load", () => {
+          try { const raw = frame.contentDocument && frame.contentDocument.querySelector("#chp_raw"); done(raw ? raw.innerHTML : null); }
+          catch (e) { done(null); }
+        }, { once: true });
+        setTimeout(() => done(null), 30000);
+        frame.src = ${JSON.stringify(url)};
+        document.body.appendChild(frame);
+      });`,
+      storage: { cookies: this.cookieStorage.cookiesForUrl(url) },
+    });
+    if (typeof result !== "string" || !result.trim()) {
+      throw new Error(`ScribbleHub: the chapter page did not load (${url})`);
+    }
+    const $ = cheerio.load(`<div id="chp_raw">${result}</div>`);
 
     return {
       id: chapter.chapterId,

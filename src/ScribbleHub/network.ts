@@ -36,14 +36,15 @@ export class ScribbleHubInterceptor extends PaperbackInterceptor {
     const challenged =
       response.headers?.["cf-mitigated"] === "challenge" ||
       ((response.status === 403 || response.status === 503) &&
-        /challenge-platform|Attention Required|Just a moment|cf-error/i.test(body));
+        /challenge-platform|Just a moment|cf-chl/i.test(body));
+    const blocked =
+      response.status === 403 && /Attention Required|you have been blocked|cf-error/i.test(body);
 
     if (challenged) {
-      // Chapter pages (/read/…) carry a check of their own that the front page's clearance does not cover, so the bypass
-      // opens the chapter page itself; everything else shares one canonical URL so concurrent failures coalesce.
+      // One canonical URL so concurrent failures coalesce into a single bypass.
       throw new CloudflareError(
         {
-          url: /\/read\//.test(request.url) ? request.url : this.domain,
+          url: this.domain,
           method: "GET",
           headers: {
             referer: `${this.domain}/`,
@@ -52,6 +53,10 @@ export class ScribbleHubInterceptor extends PaperbackInterceptor {
         },
         "Bot verification detected, bypass it to continue!",
       );
+    }
+    if (blocked) {
+      // A firewall rule, not a challenge: there is nothing a bypass could solve.
+      throw new Error(`ScribbleHub's firewall refused this request: ${request.url}`);
     }
 
     if (response.status !== 200) {
