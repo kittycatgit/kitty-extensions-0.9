@@ -41,6 +41,10 @@ import { type CheerioAPI } from "cheerio";
 import { genreOptions } from "./genreOptions";
 import { genres } from "./genres";
 import { DOMAIN, type Metadata } from "./models";
+
+// Covers come as plain http (or protocol-relative) from the markup; the app refuses plain http (ATS) and the CDN serves https.
+const httpsUrl = (u: string | undefined): string =>
+  (u ?? "").replace(/^http:\/\//, "https://").replace(/^\/\//, "https://");
 import { MangaFoxInterceptor } from "./network";
 import type MangaFoxConfig from "./pbconfig";
 
@@ -147,7 +151,7 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
       const unit = $(element);
       const mangaLink = $('a[href^="/manga/"]', unit).first();
       const mangaId = mangaLink.attr("href")?.split("/manga/")[1]?.replace(/\//g, "") || "";
-      const image = $("img.manga-list-1-cover", unit).attr("src") ?? "";
+      const image = httpsUrl($("img.manga-list-1-cover", unit).attr("src"));
       const title = mangaLink.attr("title")?.trim() ?? "";
       const subtitle = $("p.manga-list-1-item-subtitle", unit).text().trim();
 
@@ -205,7 +209,7 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
 
       const mangaLink = $('a[href^="/manga/"]', unit).first();
       const mangaId = mangaLink.attr("href")?.split("/manga/")[1]?.replace(/\//g, "") || "";
-      const image = $("img.manga-list-1-cover", unit).attr("src") ?? "";
+      const image = httpsUrl($("img.manga-list-1-cover", unit).attr("src"));
       const title = mangaLink.attr("title")?.trim() ?? "";
       const subtitle = $("ul.manga-list-4-item-part > li", unit).text().trim();
 
@@ -264,14 +268,9 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
     const page = (metadata as { page?: number } | undefined)?.page ?? 1;
 
     // Build the URL with proper pagination
-    const urlBuilder = new URL(DOMAIN).addPathComponent("releases");
-
-    if (page > 1) {
-      urlBuilder.addPathComponent(`${page}.html`);
-    }
-
+    // Slash-terminated: /releases without it 301s to plain http, which iOS refuses.
     const request = {
-      url: urlBuilder.toString(),
+      url: page > 1 ? `${DOMAIN}/releases/${page}.html` : `${DOMAIN}/releases/`,
       method: "GET",
     };
 
@@ -283,7 +282,7 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
 
       const mangaLink = $("p.manga-list-4-item-title a", unit).first();
       const mangaId = mangaLink.attr("href")?.split("/manga/")[1]?.replace(/\//g, "") || "";
-      const image = $("img.manga-list-4-cover", unit).attr("src") ?? "";
+      const image = httpsUrl($("img.manga-list-4-cover", unit).attr("src"));
       const title = mangaLink.attr("title")?.trim() ?? "";
       //const subtitle = $('p.manga-list-4-item-subtitle', unit).text().trim();
       const subtitle = $("ul.manga-list-4-item-part > li", unit).first().text().trim();
@@ -445,7 +444,7 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
 
       const mangaLink = $("p.manga-list-4-item-title a", unit).first();
       const mangaId = mangaLink.attr("href")?.split("/manga/")[1]?.replace(/\//g, "") || "";
-      const image = $("img.manga-list-4-cover", unit).attr("src") ?? "";
+      const image = httpsUrl($("img.manga-list-4-cover", unit).attr("src"));
       const title = mangaLink.attr("title")?.trim() ?? "";
       //const subtitle = $('p.manga-list-4-item-subtitle', unit).text().trim();
       const subtitle = $("ul.manga-list-4-item-part > li", unit).first().text().trim();
@@ -513,7 +512,7 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
     const title = $("span.detail-info-right-title-font", section).text().trim();
     const rating = $("span.item-score", section).text().trim().replace(",", ".");
     const author = $("p.detail-info-right-say a", section).text().trim();
-    const image = $(".detail-info-cover-img", $(".detail-info-cover")).attr("src") ?? "";
+    const image = httpsUrl($(".detail-info-cover-img", $(".detail-info-cover")).attr("src"));
     const description = $("p.fullcontent").text().trim();
 
     const arrayTags: Tag[] = [];

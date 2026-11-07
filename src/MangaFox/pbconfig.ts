@@ -6,7 +6,7 @@ import { ContentRating, SourceIntents, type ExtensionInfo } from "@paperback/typ
 export default {
   name: "MangaFox",
   description: "Extension that pulls content from fanfox.net.",
-  version: "3.0.0",
+  version: "4.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.MATURE,
