@@ -607,11 +607,11 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
 
       const chapterIdRegex = chapterIdRaw?.match(/\/manga\/[a-zA-Z0-9_]*\/(.*)\//);
 
-      let chapterId: string | null = null;
-      if (chapterIdRegex && chapterIdRegex[1])
-        chapterId = chapterIdRegex[1].split("/").pop() ?? null;
+      // The whole path after the title ("v01/c001", "c1046.5"): the reader URL does not resolve without the volume segment.
+      const chapterId: string | null = chapterIdRegex?.[1] ?? null;
 
       if (!chapterId) continue;
+      const volume = /(?:^|\/)v(\d+)/.exec(chapterId)?.[1];
 
       console.log(`Chapter ID: ${chapterId}`);
 
@@ -620,6 +620,7 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
       if (chapRegex && chapRegex[1]) chapNum = Number(chapRegex[1]);
 
       chapters.push({
+        ...(volume ? { volume: Number(volume) } : {}),
         chapterId: chapterId,
         sourceManga: sourceManga,
         //title: title,
@@ -686,7 +687,7 @@ const parseDate = (date: string): Date => {
   date = date.toUpperCase();
   let time: Date;
   const number = Number((/\d*/.exec(date) ?? [])[0]);
-  if (date.includes("LESS THAN AN HOUR") || date.includes("JUST NOW")) {
+  if (date.includes("LESS THAN AN HOUR") || date.includes("JUST NOW") || date.includes("TODAY")) {
     time = new Date(Date.now());
   } else if (date.includes("YEAR") || date.includes("YEARS")) {
     time = new Date(Date.now() - number * 31556952000);
