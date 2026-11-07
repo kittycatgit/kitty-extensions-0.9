@@ -2,6 +2,7 @@
 /* Copyright © 2026 kittycatgit */
 
 import {
+  CloudflareError,
   ContentRating,
   CookieStorageInterceptor,
   DiscoverSectionType,
@@ -65,13 +66,66 @@ class ScribbleHubExtension implements ExtensionImpl<typeof pbconfigType> {
     this.interceptor.registerInterceptor();
   }
 
-  private async request(request: Request): Promise<string> {
-    const [, buffer] = await Application.scheduleRequest(request);
-    return Application.arrayBufferToUTF8String(buffer);
+  // Every page is read through the app's WebView, as a frame navigation: the site's Cloudflare clearance is bound to the
+  // browser's TLS fingerprint, so a cookie earned in the bypass never works for the app's own HTTP client, and the
+  // firewall refuses that client's script-style requests outright. `extra` runs inside the loaded frame and its return
+  // value comes back beside the document (used for the TOC, which the page fetches over ajax).
+  private async webPage(
+    url: string,
+    extra = "return null;",
+  ): Promise<{ html: string; extra: unknown }> {
+    const { result, storage } = await Application.executeInWebView({
+      source: {
+        baseUrl: url,
+        html: "<!DOCTYPE html><html><head></head><body></body></html>",
+        loadCSS: false,
+        loadImages: false,
+        userAgent: await Application.getDefaultUserAgent(),
+      },
+      inject: `return new Promise((resolve) => {
+        const frame = document.createElement("iframe");
+        frame.style.cssText = "position:fixed;left:0;top:0;width:900px;height:600px;opacity:0";
+        const done = (value) => { frame.remove(); resolve(value); };
+        frame.addEventListener("load", async () => {
+          try {
+            const doc = frame.contentDocument, win = frame.contentWindow;
+            if (!doc || !doc.documentElement) return done({ error: "no document" });
+            const title = doc.title || "";
+            if (/just a moment|attention required|access denied/i.test(title)) return done({ challenge: title });
+            const extra = await (async function (document, window, fetch) { ${extra} })(doc, win, win.fetch.bind(win));
+            done({ html: doc.documentElement.outerHTML, extra });
+          } catch (e) { done({ error: String(e && e.message || e) }); }
+        }, { once: true });
+        setTimeout(() => done({ error: "timed out" }), 45000);
+        frame.src = ${JSON.stringify(url)};
+        document.body.appendChild(frame);
+      });`,
+      storage: { cookies: this.cookieStorage.cookiesForUrl(url) },
+    });
+    for (const cookie of storage?.cookies ?? []) this.cookieStorage.setCookie(cookie);
+    const page = (result ?? {}) as {
+      html?: string;
+      extra?: unknown;
+      challenge?: string;
+      error?: string;
+    };
+    if (page.challenge) {
+      throw new CloudflareError(
+        {
+          url: DOMAIN,
+          method: "GET",
+          headers: { "user-agent": await Application.getDefaultUserAgent() },
+        },
+        "Bot verification detected, bypass it to continue!",
+      );
+    }
+    if (!page.html)
+      throw new Error(`ScribbleHub: the page did not load (${page.error ?? "empty"}): ${url}`);
+    return { html: page.html, extra: page.extra };
   }
 
   private async document(url: string): Promise<cheerio.CheerioAPI> {
-    return cheerio.load(await this.request({ url, method: "GET" }));
+    return cheerio.load((await this.webPage(url)).html);
   }
 
   async getDiscoverSections(): Promise<DiscoverSection[]> {
@@ -288,16 +342,33 @@ class ScribbleHubExtension implements ExtensionImpl<typeof pbconfigType> {
     };
   }
 
-  // The series page pages its own table of contents with ?toc=N, 15 rows a page, newest first; the admin-ajax POST the
-  // site's scripts use is refused to the app by the firewall, so the pages are read as the plain GETs a browser makes.
+  // One WebView visit: the series page loads in the frame, then the page's own TOC ajax is paged from inside that
+  // frame (a browser request, 15 rows a page, newest first) until a page repeats or comes back empty.
   async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
+    const postId = sourceManga.mangaId.split("/")[0];
+    const { html, extra } = await this.webPage(
+      this.getMangaShareUrl(sourceManga.mangaId),
+      `const pages = [];
+       for (let page = 1; page <= 200; page++) {
+         const r = await fetch("/wp-admin/admin-ajax.php", { method: "POST", credentials: "include",
+           headers: { "content-type": "application/x-www-form-urlencoded", "x-requested-with": "XMLHttpRequest" },
+           body: "action=wi_getreleases_pagination&mypostid=${postId}&pagenum=" + page });
+         if (r.status !== 200) break;
+         const text = await r.text();
+         if (!/toc_w/.test(text) || pages.includes(text)) break;
+         pages.push(text);
+       }
+       return pages;`,
+    );
     const rows: ChapterRow[] = [];
-
-    for (let page = 1; ; page++) {
-      const $ = await this.document(`${DOMAIN}/series/${sourceManga.mangaId}/?toc=${page}`);
-      const batch = parseChapterRows($);
-      if (batch.length === 0 || rows.some((row) => row.id === batch[0]!.id)) break;
-      rows.push(...batch);
+    const seen = new Set<string>();
+    const batches = Array.isArray(extra) && extra.length > 0 ? (extra as string[]) : [html];
+    for (const batch of batches) {
+      for (const row of parseChapterRows(cheerio.load(batch))) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+        rows.push(row);
+      }
     }
 
     if (rows.length === 0) {
@@ -317,35 +388,7 @@ class ScribbleHubExtension implements ExtensionImpl<typeof pbconfigType> {
   }
 
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
-    const url = `${DOMAIN}/${chapter.chapterId}/`;
-    // The firewall serves chapter pages to page navigations only (a plain request gets a 403 block page with nothing to
-    // solve). A same-origin frame inside the app's WebView is a navigation, so the chapter is read from there.
-    const { result } = await Application.executeInWebView({
-      source: {
-        baseUrl: url,
-        html: "<!DOCTYPE html><html><head></head><body></body></html>",
-        loadCSS: false,
-        loadImages: false,
-        userAgent: await Application.getDefaultUserAgent(),
-      },
-      inject: `return new Promise((resolve) => {
-        const frame = document.createElement("iframe");
-        frame.style.cssText = "position:fixed;left:0;top:0;width:900px;height:600px;opacity:0";
-        const done = (value) => { frame.remove(); resolve(value); };
-        frame.addEventListener("load", () => {
-          try { const raw = frame.contentDocument && frame.contentDocument.querySelector("#chp_raw"); done(raw ? raw.innerHTML : null); }
-          catch (e) { done(null); }
-        }, { once: true });
-        setTimeout(() => done(null), 30000);
-        frame.src = ${JSON.stringify(url)};
-        document.body.appendChild(frame);
-      });`,
-      storage: { cookies: this.cookieStorage.cookiesForUrl(url) },
-    });
-    if (typeof result !== "string" || !result.trim()) {
-      throw new Error(`ScribbleHub: the chapter page did not load (${url})`);
-    }
-    const $ = cheerio.load(`<div id="chp_raw">${result}</div>`);
+    const $ = await this.document(`${DOMAIN}/${chapter.chapterId}/`);
 
     return {
       id: chapter.chapterId,
