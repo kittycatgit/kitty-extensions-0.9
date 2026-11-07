@@ -301,9 +301,11 @@ class MangaKExtension implements ExtensionImpl<typeof pbconfigType> {
     if (filters?.uncensored) add("uncensored", "true");
     if (filters?.mtl) add("mtl", "true");
 
-    // Without a sort a title search is ranked by relevance; a filter-only
-    // search needs one or the site answers with the catalogue in no order.
-    add("sort", sort ?? (title ? undefined : DEFAULT_SORT));
+    // A title search is ranked by relevance only while no sort is sent: any sort
+    // reorders the site's fuzzy match set instead, and "naruto" sorted by latest
+    // comes back without a single Naruto title. So the sort picker only applies
+    // to filter-only searches, which need one or the catalogue arrives unordered.
+    add("sort", title ? undefined : (sort ?? DEFAULT_SORT));
     params.push(`page=${page}`);
 
     return `?${params.join("&")}`;
