@@ -33,12 +33,15 @@ export class ScribbleHubInterceptor extends PaperbackInterceptor {
     data: ArrayBuffer,
   ): Promise<ArrayBuffer> {
     const body = response.status === 200 ? "" : Application.arrayBufferToUTF8String(data);
-    const challenged =
-      response.headers?.["cf-mitigated"] === "challenge" ||
-      ((response.status === 403 || response.status === 503) &&
-        /challenge-platform|Just a moment|cf-chl/i.test(body));
+    const title = /<title[^>]*>([^<]*)/i.exec(body)?.[1] ?? "";
+    // A block page ("Attention Required!") embeds Cloudflare's challenge script too, so the title decides: only a real
+    // challenge page gets the bypass; a firewall block has nothing to solve.
     const blocked =
-      response.status === 403 && /Attention Required|you have been blocked|cf-error/i.test(body);
+      response.status === 403 &&
+      (/attention required|access denied/i.test(title) || /you have been blocked/i.test(body));
+    const challenged =
+      !blocked &&
+      (response.headers?.["cf-mitigated"] === "challenge" || /just a moment/i.test(title));
 
     if (challenged) {
       // One canonical URL so concurrent failures coalesce into a single bypass.

@@ -52,6 +52,10 @@ import type pbconfigType from "./pbconfig";
 
 type PageMetadata = { page: number };
 
+// The interceptor's block-page error, recognised by message: errors lose their class across the native bridge.
+const isFirewallRefusal = (e: unknown): boolean =>
+  /firewall refused/i.test(String((e as Error | undefined)?.message ?? e));
+
 const ADULT_MARKERS = /adult|smut|mature|sexual/i;
 
 class ScribbleHubExtension implements ExtensionImpl<typeof pbconfigType> {
@@ -66,10 +70,19 @@ class ScribbleHubExtension implements ExtensionImpl<typeof pbconfigType> {
     this.interceptor.registerInterceptor();
   }
 
-  // Every page is read through the app's WebView, as a frame navigation: the site's Cloudflare clearance is bound to the
-  // browser's TLS fingerprint, so a cookie earned in the bypass never works for the app's own HTTP client, and the
-  // firewall refuses that client's script-style requests outright. `extra` runs inside the loaded frame and its return
-  // value comes back beside the document (used for the TOC, which the page fetches over ajax).
+  private async request(request: Request): Promise<string> {
+    const [, buffer] = await Application.scheduleRequest(request);
+    return Application.arrayBufferToUTF8String(buffer);
+  }
+
+  private async document(url: string): Promise<cheerio.CheerioAPI> {
+    return cheerio.load(await this.request({ url, method: "GET" }));
+  }
+
+  // The firewall answers some requests from the app (chapter pages, TOC paging) with a block page while serving the
+  // same URLs to a browser. Those, and only those, are loaded through the app's WebView as a frame navigation: the
+  // browser's own request, with the browser's clearance. `extra` runs inside the loaded frame; its value comes back
+  // beside the document.
   private async webPage(
     url: string,
     extra = "return null;",
@@ -122,10 +135,6 @@ class ScribbleHubExtension implements ExtensionImpl<typeof pbconfigType> {
     if (!page.html)
       throw new Error(`ScribbleHub: the page did not load (${page.error ?? "empty"}): ${url}`);
     return { html: page.html, extra: page.extra };
-  }
-
-  private async document(url: string): Promise<cheerio.CheerioAPI> {
-    return cheerio.load((await this.webPage(url)).html);
   }
 
   async getDiscoverSections(): Promise<DiscoverSection[]> {
@@ -342,33 +351,50 @@ class ScribbleHubExtension implements ExtensionImpl<typeof pbconfigType> {
     };
   }
 
-  // One WebView visit: the series page loads in the frame, then the page's own TOC ajax is paged from inside that
-  // frame (a browser request, 15 rows a page, newest first) until a page repeats or comes back empty.
+  // The series page carries the first 15 rows of the TOC and pages the rest with ?toc=N, requested like the series page
+  // itself. Should the firewall refuse one of those, the rest is paged by the page's own script inside the WebView.
   async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
+    const seriesUrl = this.getMangaShareUrl(sourceManga.mangaId);
     const postId = sourceManga.mangaId.split("/")[0];
-    const { html, extra } = await this.webPage(
-      this.getMangaShareUrl(sourceManga.mangaId),
-      `const pages = [];
-       for (let page = 1; page <= 200; page++) {
-         const r = await fetch("/wp-admin/admin-ajax.php", { method: "POST", credentials: "include",
-           headers: { "content-type": "application/x-www-form-urlencoded", "x-requested-with": "XMLHttpRequest" },
-           body: "action=wi_getreleases_pagination&mypostid=${postId}&pagenum=" + page });
-         if (r.status !== 200) break;
-         const text = await r.text();
-         if (!/toc_w/.test(text) || pages.includes(text)) break;
-         pages.push(text);
-       }
-       return pages;`,
-    );
     const rows: ChapterRow[] = [];
     const seen = new Set<string>();
-    const batches = Array.isArray(extra) && extra.length > 0 ? (extra as string[]) : [html];
-    for (const batch of batches) {
-      for (const row of parseChapterRows(cheerio.load(batch))) {
+    const add = (batch: ChapterRow[]): boolean => {
+      let added = 0;
+      for (const row of batch) {
         if (seen.has(row.id)) continue;
         seen.add(row.id);
         rows.push(row);
+        added++;
       }
+      return added > 0;
+    };
+
+    add(parseChapterRows(await this.document(seriesUrl)));
+    for (let page = 2; page <= 200; page++) {
+      let $: cheerio.CheerioAPI;
+      try {
+        $ = await this.document(`${seriesUrl}?toc=${page}`);
+      } catch (e) {
+        if (!isFirewallRefusal(e)) throw e;
+        const { extra } = await this.webPage(
+          seriesUrl,
+          `const pages = [];
+           for (let page = ${page}; page <= 200; page++) {
+             const r = await fetch("/wp-admin/admin-ajax.php", { method: "POST", credentials: "include",
+               headers: { "content-type": "application/x-www-form-urlencoded", "x-requested-with": "XMLHttpRequest" },
+               body: "action=wi_getreleases_pagination&mypostid=${postId}&pagenum=" + page });
+             if (r.status !== 200) break;
+             const text = await r.text();
+             if (!/toc_w/.test(text) || pages.includes(text)) break;
+             pages.push(text);
+           }
+           return pages;`,
+        );
+        for (const batch of Array.isArray(extra) ? (extra as string[]) : [])
+          add(parseChapterRows(cheerio.load(batch)));
+        break;
+      }
+      if (!add(parseChapterRows($))) break;
     }
 
     if (rows.length === 0) {
@@ -388,7 +414,14 @@ class ScribbleHubExtension implements ExtensionImpl<typeof pbconfigType> {
   }
 
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
-    const $ = await this.document(`${DOMAIN}/${chapter.chapterId}/`);
+    const url = `${DOMAIN}/${chapter.chapterId}/`;
+    let $: cheerio.CheerioAPI;
+    try {
+      $ = await this.document(url);
+    } catch (e) {
+      if (!isFirewallRefusal(e)) throw e;
+      $ = cheerio.load((await this.webPage(url)).html);
+    }
 
     return {
       id: chapter.chapterId,
