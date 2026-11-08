@@ -104,10 +104,11 @@ export function parseMangaDetails($: CheerioAPI, mangaId: string, domain: string
   }
   const tagGroups: TagSection[] = tags.length ? [{ id: "genres", title: "Genres", tags }] : [];
 
-  // Commas also appear inside single names, so only the slash separates them.
-  const secondaryTitles = infoValue("other name")
-    .text()
-    .split(" / ")
+  // The row separates names with a slash, sometimes without the spaces around it, and on some titles with commas
+  // instead. Commas also appear inside a name, so they only count when the row has no slash at all.
+  const otherNames = infoValue("other name").text().trim();
+  const secondaryTitles = otherNames
+    .split(otherNames.includes("/") ? "/" : ",")
     .map((name) => name.trim())
     .filter((name, index, names) => {
       const key = name.toLowerCase();
