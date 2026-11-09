@@ -69,8 +69,13 @@ export type ApiSearch = { rows?: ApiManga[] | null; count?: number | null };
 // The schema exposes other sources, but this is the only one the site queries.
 export const SOURCE = "m01";
 
-export const API_URL = "https://api.mghcdn.com/graphql";
 export const DOMAIN = "https://mangahub.io";
+
+// api.mghcdn.com answers third parties with "This app does not have permission to
+// access the website content" since November 2026; the site now talks to its own
+// origin, which is what the app has to do as well.
+export const API_URL = `${DOMAIN}/graphql`;
+export const CHAPTER_CRYPTO_URL = `${DOMAIN}/api/chapter-crypto`;
 export const COVER_CDN = "https://thumb.mghcdn.com";
 export const PAGE_CDN = "https://imgx.mghcdn.com";
 

@@ -21,6 +21,7 @@ import {
 } from "@paperback/types";
 
 import { gqlString, MangaHubApi } from "./api";
+import { decryptEncV1 } from "./crypto";
 import { MangaHubSearchForm } from "./forms";
 import {
   DEFAULT_SORT,
@@ -59,7 +60,7 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
 
   private readonly interceptor = new MangaHubInterceptor("main");
 
-  private readonly api = new MangaHubApi();
+  private readonly api = new MangaHubApi(this.interceptor);
 
   async initialise(): Promise<void> {
     this.cookieStorage.registerInterceptor();
@@ -90,7 +91,7 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
     const mangaId = chapter.sourceManga.mangaId;
     const number = Number(chapter.chapterId);
 
-    const data = await this.api.query<{ chapter?: ApiChapterFull }>(
+    const { data, keys } = await this.api.queryChapter<{ chapter?: ApiChapterFull }>(
       `{chapter(x:${SOURCE},slug:${gqlString(mangaId)},number:${number}){id,mangaID,number,title,slug,date,pages,s}}`,
     );
 
@@ -98,7 +99,12 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
       throw new Error(`Chapter ${chapter.chapterId} is no longer listed for ${mangaId}`);
     }
 
-    const pages = parseChapterPages(data.chapter);
+    // The page list arrives as AES-GCM ciphertext keyed to the request's access token.
+    const payload = data.chapter.pages;
+    const pages = parseChapterPages({
+      ...data.chapter,
+      pages: payload?.startsWith("enc:v1:") ? decryptEncV1(payload, keys) : payload,
+    });
 
     if (pages.length === 0) {
       throw new Error(`Unable to read any pages for chapter ${chapter.chapterId}`);

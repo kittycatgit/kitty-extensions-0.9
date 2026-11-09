@@ -36,11 +36,7 @@ export class MangaHubInterceptor extends PaperbackInterceptor {
     };
 
     if (!isImage) {
-      // The access token is deliberately left out: it is minted per request by
-      // the API client, and replaying a stored one is what exhausted it.
-      const { [ACCESS_COOKIE]: _spent, ...carried } = this.session;
-
-      request.cookies = { ...request.cookies, ...carried };
+      request.cookies = { ...request.cookies, ...this.session };
     }
 
     return request;
@@ -120,5 +116,14 @@ export class MangaHubInterceptor extends PaperbackInterceptor {
 
   get cookies(): Readonly<Record<string, string>> {
     return { ...this.session };
+  }
+
+  /**
+   * The access token the site last issued, if it has issued one. The API compares
+   * the `x-mhub-access` header against this cookie and answers a mismatch with
+   * 409 session_changed, so whatever is stored here is what has to be sent.
+   */
+  get accessToken(): string | undefined {
+    return this.session[ACCESS_COOKIE];
   }
 }
