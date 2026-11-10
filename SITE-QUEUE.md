@@ -8,7 +8,8 @@ client-rendered. Each line is the live engine, not a guess from the site name.
 DanmeiNovel, ManhuaHot, SleepyTranslations, KSGroupScans, YakshaComics, S2Read,
 Tritinia (Madara) · EvaScans, MadaraScans, AthreaScans (Themesia/mangareader) ·
 LazyGirlTranslations, PandaTranslations, NoodleBrainSquad (src/lightnovel) ·
-ErisScans, WriterScans, GrimScans, KewnScans, MistScans (src/meowing)
+ErisScans, WriterScans, GrimScans, KewnScans, MistScans (src/meowing) ·
+NyxScans, KenComics (src/vcomics)
 
 ## Queue
 
@@ -28,9 +29,15 @@ ErisScans, WriterScans, GrimScans, KewnScans, MistScans (src/meowing)
 - asmotoon.com — same vendor, newer JS-rendered build: chapters come from `loadChaptersList()`, series uid in `div#chapters-list[data-series-uid]`, root-level `/<slug>` series URLs, so it needs its own getChapters against that loader
 - Base notes: `/series/` ships the whole catalogue in one response (search and filters run locally off it), cards carry `alt`/`title`/`tags`/`data-type`/`data-status`, chapter anchors carry `title`/`d` (date)/`c` (coin cost, >1 = locked), pages are `img.myImage[uid]` under `#pages` resolved to `cdn.meowing.org/uploads/<uid>`, and a bare "start reading" anchor duplicates chapter 1 without attributes
 
-### vcomics (Astro + React, one base, two children)
+### vcomics — done as src/vcomics
 
-- nyxscans.com, kencomics.com — `/series/<slug>` + `/series/<slug>/chapter-<n>`, `/_vcomics/` assets, `/api/track-visit`; catalog ships in `/series`, decimal chapter numbers, coin locks
+Both sites are driven by a public JSON API on `api.<host>`, so the Astro markup
+is never parsed: `/api/query` (page, perPage, view=archive, orderBy of
+lastChapterAddedAt|createdAt|views|averageRating, searchTerm, genreIds
+comma-joined, seriesType, seriesStatus), `/api/genres`, `/api/post?postId=`,
+`/api/chapters?postId=` (complete list, no paging) and `/api/chapter?chapterId=`
+(images, or `content` for novels, plus the lock flags). Media urls come back
+with a doubled slash after the host.
 
 ### Laravel / Livewire
 
