@@ -6,7 +6,7 @@ import { ContentRating, type ExtensionInfo, SourceIntents } from "@paperback/typ
 export default {
   name: "Mangaball",
   description: "Extension that pulls content from mangaball.com.",
-  version: "2.0.0",
+  version: "3.0.0",
   icon: "icon.png",
   language: "multi",
   contentRating: ContentRating.ADULT,

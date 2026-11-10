@@ -475,7 +475,12 @@ function withSubtitle(title: ApiTitle): { subtitle?: string } {
 function coverUrl(image: ApiImage | null | undefined): string {
   const path = image?.cover?.path?.trim();
   if (path) {
-    return /^https?:\/\//.test(path) ? path : `${COVER_CDN}${path.replace(/^\/+/, "")}`;
+    // A seventh of the catalogue stores this as a Windows path. A browser and
+    // Node fold the backslash to a slash, so only the device sees it: iOS sends
+    // %5C and the CDN answers 404.
+    const normalised = path.replace(/\\/g, "/").replace(/^\/+/, "");
+
+    return /^https?:\/\//.test(path) ? path : `${COVER_CDN}${normalised}`;
   }
   for (const candidate of [
     image?.cdn_mangadex,
@@ -492,7 +497,17 @@ function coverUrl(image: ApiImage | null | undefined): string {
 function synopsis(title: ApiTitle): string {
   const description = title.description;
   const text = Array.isArray(description) ? description.join("\n\n") : (description ?? "");
-  return Application.decodeHTMLEntities(text.replace(/<[^>]+>/g, "")).trim();
+  // The field is markdown, which the site renders and the app does not.
+  return Application.decodeHTMLEntities(
+    text
+      .replace(/<[^>]+>/g, "")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/\*\*([^*\n]+)\*\*/g, "$1")
+      .replace(/\*([^*\n]+)\*/g, "$1")
+      .replace(/^\s*(?:_{3,}|-{3,}|\*{3,})\s*$/gm, "")
+      .replace(/^\s*[-*]\s+/gm, "• ")
+      .replace(/\n{3,}/g, "\n\n"),
+  ).trim();
 }
 
 function capitalize(value: string): string {
