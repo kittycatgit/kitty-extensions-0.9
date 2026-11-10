@@ -12,7 +12,7 @@ ErisScans, WriterScans, GrimScans, KewnScans, MistScans (src/meowing) ·
 NyxScans, KenComics (src/vcomics) · KeroScans, DesireScans (src/kero) ·
 RitharScans, ArtLapsa, KitsuneDawn (src/lwcomics) ·
 AquaReader, ArenaScans, LinkManga (Madara with custom skins) ·
-MangaMikan, ReadManhwas (src/mangaberri) · RenaScans, FroPi, NuviaToon
+MangaMikan, ReadManhwas (src/mangaberri) · RenaScans, FroPi, NuviaToon, ManhwaH
 
 ## Queue
 
@@ -68,7 +68,6 @@ earlier "origin stalls under curl" note was transient; plain curl works.
 
 - done as src/kero: `/series?page=&q=&sort=latest|popular|newest&type=&status=&genre=a,b` (genre is comma-joined AND; repeating the key is ignored), details and chapters from the `"series"` record on `/series/comic/<slug>`, pages from `/series/comic/<slug>/chapter/<n>`. Read the RSC payload by JSON-parsing each `self.__next_f.push([1,"..."])` literal — unescaping the html by hand corrupts any string containing a quote. Page objects carry isEncrypted/hasFragments/hasStrips flags, which this refuses loudly rather than guessing at.
 - philiascans.org — `/series/<slug>`, reader `/read/<opaque-token>?lang=en`. The flight payload holds no chapter list and the app calls `/api/v1/internal/bot-verify`, so expect a gate in front of the data; fingerprint that endpoint before writing anything.
-- manhwah.com — `/title-detail/<slug>`, `/chapter-detail/<mongoid>`, `/advanced-search`
 - manhuatop.org — `/series/?sort=`, `/manhua/<slug>/chapter-<n>`, `/api/auth/session`; Cloudflare-gated
 - oriyami.com — `/manga|/manhwa|/manhua/<slug>`, chapters in the flight payload, `/library?q=`
 - komix.to — `/title/<slug>`, `/api/page-data/home`, `/browse`
