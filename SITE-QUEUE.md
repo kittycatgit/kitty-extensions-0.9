@@ -9,7 +9,7 @@ DanmeiNovel, ManhuaHot, SleepyTranslations, KSGroupScans, YakshaComics, S2Read,
 Tritinia (Madara) · EvaScans, MadaraScans, AthreaScans (Themesia/mangareader) ·
 LazyGirlTranslations, PandaTranslations, NoodleBrainSquad (src/lightnovel) ·
 ErisScans, WriterScans, GrimScans, KewnScans, MistScans (src/meowing) ·
-NyxScans, KenComics (src/vcomics)
+NyxScans, KenComics (src/vcomics) · KeroScans, DesireScans (src/kero)
 
 ## Queue
 
@@ -52,7 +52,7 @@ with a doubled slash after the host.
 
 ### Next.js / RSC
 
-- keroscans.net and desirescans.com — same platform: `/series/comic/<slug>/chapter/<n>`, `?q=` server search, `?type=`/`?sort=` filters, coin store
+- done as src/kero: `/series?page=&q=&sort=latest|popular|newest&type=&status=&genre=a,b` (genre is comma-joined AND; repeating the key is ignored), details and chapters from the `"series"` record on `/series/comic/<slug>`, pages from `/series/comic/<slug>/chapter/<n>`. Read the RSC payload by JSON-parsing each `self.__next_f.push([1,"..."])` literal — unescaping the html by hand corrupts any string containing a quote. Page objects carry isEncrypted/hasFragments/hasStrips flags, which this refuses loudly rather than guessing at.
 - renascans.net — `/manga/<slug>/chapter-<n>`, `/series?q=`
 - philiascans.org — `/series/<slug>`, reader `/read/<opaque-token>?lang=en`, Madara-style `/all-mangas?m_orderby=` vocabulary
 - nuviatoon.org — `/comics/<slug>/chapter/<n>`, also `/novels`
