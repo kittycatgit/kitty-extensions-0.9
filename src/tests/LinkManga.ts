@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unused-expressions */
-import { type Chapter, type TestLogger } from "@paperback/types";
+import { type TestLogger } from "@paperback/types";
 import { expect } from "chai";
 
 import { LinkManga } from "../LinkManga/main.js";
