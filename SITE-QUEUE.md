@@ -10,16 +10,23 @@ Tritinia (Madara) · EvaScans, MadaraScans, AthreaScans (Themesia/mangareader) �
 LazyGirlTranslations, PandaTranslations, NoodleBrainSquad (src/lightnovel) ·
 ErisScans, WriterScans, GrimScans, KewnScans, MistScans (src/meowing) ·
 NyxScans, KenComics (src/vcomics) · KeroScans, DesireScans (src/kero) ·
-RitharScans, ArtLapsa, KitsuneDawn (src/lwcomics)
+RitharScans, ArtLapsa, KitsuneDawn (src/lwcomics) ·
+AquaReader, ArenaScans, LinkManga (Madara with custom skins)
 
 ## Queue
 
-### Madara, needs a parser or WAF override
+### Madara
 
-- aquareader.org — Madara backend, fully custom "aqua-" skin (`aqua-series-info__title`, `aqua-series-cover__img`); needs its own parser. Folder already scaffolded.
-- arenascans.org — Madara child "madara-child-mk": results are `a.acard` + `img.ac-cover`, random alphanumeric slugs. Folder already scaffolded.
-- linkmanga.com — Madara, but the WAF 403s any query string (`?s=`, `?m_orderby=`). Use `/search/<query>/` for search (works) and `POST /wp-admin/admin-ajax.php action=wp-manga-search-manga` as the typeahead; needs query-free discover paths. Folder already scaffolded.
 - manhuarmtl.com — textbook Madara (`/manga/<slug>/`, ajax chapters); Cloudflare-gated, so local tests need the bypass.
+
+Notes from the three custom skins now done: aquareader keeps stock Madara markup
+on `?s=` but aqua cards everywhere else, so its parser reads both; arenascans
+serves `a.acard` listings and an `h*`-prefixed hero block but an untouched
+chapter ajax route; linkmanga's WAF 403s every query string, so its listing is
+`/manga/page/N/`, genres browse as `/manga-genre/<slug>/page/N/`, the reader
+must not get `?style=list`, and title search goes through the
+`wp-manga-search-manga` POST because `/search/<query>/` now answers "Access
+Denied" with a 200.
 
 ### Themesia
 
