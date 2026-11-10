@@ -9,7 +9,8 @@ DanmeiNovel, ManhuaHot, SleepyTranslations, KSGroupScans, YakshaComics, S2Read,
 Tritinia (Madara) · EvaScans, MadaraScans, AthreaScans (Themesia/mangareader) ·
 LazyGirlTranslations, PandaTranslations, NoodleBrainSquad (src/lightnovel) ·
 ErisScans, WriterScans, GrimScans, KewnScans, MistScans (src/meowing) ·
-NyxScans, KenComics (src/vcomics) · KeroScans, DesireScans (src/kero)
+NyxScans, KenComics (src/vcomics) · KeroScans, DesireScans (src/kero) ·
+RitharScans, ArtLapsa, KitsuneDawn (src/lwcomics)
 
 ## Queue
 
@@ -41,9 +42,8 @@ with a doubled slash after the host.
 
 ### Laravel / Livewire
 
-- ritharscans.com and artlapsa.com — identical codebase: `/series/<uuid>`, reader `/read/<uuid>`, search via `POST /livewire/update`
-- kitsunedawn.com — same stack but SSR search works (`/search?query=`), `/library`, cdn.kitsunedawn.com
-- skydemonorder.com — Livewire, Cloudflare-gated (renders fine in Camoufox)
+- done as src/lwcomics (ritharscans, artlapsa, kitsunedawn): one Laravel/Livewire platform. Browsing only exists as the `pages::search` component, so listings come from `POST /livewire/update` with the page's csrf token, the component snapshot and the session cookies — which must be tracked by the extension's own interceptor, since the shared cookie store drops them and the site then answers "Your session expired". Paging is a `gotoPage` call, not a property update. Details come from the `ComicSeries` JSON-LD node, chapters from `a[href*="/read/"][title^="Chapter"]`, and pages from page one's own url as a template plus `pageCount` out of the reader snapshot (some sites add a `/revisions/<id>/` folder in that path).
+- skydemonorder.com — Livewire, Cloudflare-gated (renders fine in Camoufox); check whether it runs the same `pages::search` component before writing anything new
 - storyseedling.com — Livewire, `/series/<numericId>/<chapter>`, search is Livewire-only
 
 ### "mangaberri" engine (one base, two children)
