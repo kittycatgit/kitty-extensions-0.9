@@ -12,7 +12,7 @@ ErisScans, WriterScans, GrimScans, KewnScans, MistScans (src/meowing) ·
 NyxScans, KenComics (src/vcomics) · KeroScans, DesireScans (src/kero) ·
 RitharScans, ArtLapsa, KitsuneDawn (src/lwcomics) ·
 AquaReader, ArenaScans, LinkManga (Madara with custom skins) ·
-MangaMikan, ReadManhwas (src/mangaberri) · RenaScans
+MangaMikan, ReadManhwas (src/mangaberri) · RenaScans, FroPi, NuviaToon
 
 ## Queue
 
@@ -67,15 +67,12 @@ earlier "origin stalls under curl" note was transient; plain curl works.
 ### Next.js / RSC
 
 - done as src/kero: `/series?page=&q=&sort=latest|popular|newest&type=&status=&genre=a,b` (genre is comma-joined AND; repeating the key is ignored), details and chapters from the `"series"` record on `/series/comic/<slug>`, pages from `/series/comic/<slug>/chapter/<n>`. Read the RSC payload by JSON-parsing each `self.__next_f.push([1,"..."])` literal — unescaping the html by hand corrupts any string containing a quote. Page objects carry isEncrypted/hasFragments/hasStrips flags, which this refuses loudly rather than guessing at.
-- renascans.net — `/manga/<slug>/chapter-<n>`, `/series?q=`
-- philiascans.org — `/series/<slug>`, reader `/read/<opaque-token>?lang=en`, Madara-style `/all-mangas?m_orderby=` vocabulary
-- nuviatoon.org — `/comics/<slug>/chapter/<n>`, also `/novels`
-- fropi.net — `/series/<hex10>-<slug>/chapter-<n>`
+- philiascans.org — `/series/<slug>`, reader `/read/<opaque-token>?lang=en`. The flight payload holds no chapter list and the app calls `/api/v1/internal/bot-verify`, so expect a gate in front of the data; fingerprint that endpoint before writing anything.
 - manhwah.com — `/title-detail/<slug>`, `/chapter-detail/<mongoid>`, `/advanced-search`
 - manhuatop.org — `/series/?sort=`, `/manhua/<slug>/chapter-<n>`, `/api/auth/session`; Cloudflare-gated
 - oriyami.com — `/manga|/manhwa|/manhua/<slug>`, chapters in the flight payload, `/library?q=`
 - komix.to — `/title/<slug>`, `/api/page-data/home`, `/browse`
-- schalescans.com — `/manga/<slug>`, `/read/<slug>/<n>`, Vercel, no gate
+- schalescans.com — **check before building**: its chapter records carry `mangadex_id` and `primary_url: https://mangadex.org/chapter/<uuid>`, so the site is largely an index over MangaDex rather than its own library. Worth deciding whether it adds anything over the MangaDex source.
 - lunarx.to — Next.js shell over `api.lunarx.to` (`/api/...`)
 - hangulplanet.com — `/novel/<slug>`, `?cpage=` chapter paging
 - teanovel.com — `/novel/<slug>/<n>`, chapter list behind a dialog
