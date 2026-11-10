@@ -12,7 +12,7 @@ ErisScans, WriterScans, GrimScans, KewnScans, MistScans (src/meowing) ·
 NyxScans, KenComics (src/vcomics) · KeroScans, DesireScans (src/kero) ·
 RitharScans, ArtLapsa, KitsuneDawn (src/lwcomics) ·
 AquaReader, ArenaScans, LinkManga (Madara with custom skins) ·
-MangaMikan, ReadManhwas (src/mangaberri)
+MangaMikan, ReadManhwas (src/mangaberri) · RenaScans
 
 ## Queue
 
@@ -51,8 +51,8 @@ with a doubled slash after the host.
 ### Laravel / Livewire
 
 - done as src/lwcomics (ritharscans, artlapsa, kitsunedawn): one Laravel/Livewire platform. Browsing only exists as the `pages::search` component, so listings come from `POST /livewire/update` with the page's csrf token, the component snapshot and the session cookies — which must be tracked by the extension's own interceptor, since the shared cookie store drops them and the site then answers "Your session expired". Paging is a `gotoPage` call, not a property update. Details come from the `ComicSeries` JSON-LD node, chapters from `a[href*="/read/"][title^="Chapter"]`, and pages from page one's own url as a template plus `pageCount` out of the reader snapshot (some sites add a `/revisions/<id>/` folder in that path).
-- skydemonorder.com — Livewire, Cloudflare-gated (renders fine in Camoufox); check whether it runs the same `pages::search` component before writing anything new
-- storyseedling.com — Livewire, `/series/<numericId>/<chapter>`, search is Livewire-only
+- skydemonorder.com — Livewire, and the only one of this group that stays Cloudflare-gated: /projects renders in Camoufox but under a 403 interstitial with no project links, and it is not the `pages::search` platform src/lwcomics drives. Local tests cannot pass its challenge, so anything written for it can only be verified on device.
+- storyseedling.com — **parked, needs a decoder.** Browsing and the chapter list are easy: `POST /ajax` form-urlencoded with `action=fetch_browse` (`search`, `status` of any|ongoing|completed|hiatus|dropped|cancelled, `orderBy` of recent|latest|random, `curpage`, `includeGenres[]=<numeric id>`, plus `post=<token>` scraped from `x-data="browse('<token>')"`), and `action=series_toc` with `id=<seriesId>` and that page's own token returns every chapter with is_locked, price and date. The chapter text is the problem: it renders as Kangxi-radical glyphs (U+2Fxx) under a substitution font, interleaved with ~1500 decoy spans whose `cls<hash><timestamp>` classes are hidden by a per-request stylesheet. Finishing it means fetching that stylesheet to drop the hidden spans and deriving the glyph map, which is its own project.
 
 ### "mangaberri" engine — done as src/mangaberri
 
