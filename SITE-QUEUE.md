@@ -11,7 +11,8 @@ LazyGirlTranslations, PandaTranslations, NoodleBrainSquad (src/lightnovel) ·
 ErisScans, WriterScans, GrimScans, KewnScans, MistScans (src/meowing) ·
 NyxScans, KenComics (src/vcomics) · KeroScans, DesireScans (src/kero) ·
 RitharScans, ArtLapsa, KitsuneDawn (src/lwcomics) ·
-AquaReader, ArenaScans, LinkManga (Madara with custom skins)
+AquaReader, ArenaScans, LinkManga (Madara with custom skins) ·
+MangaMikan, ReadManhwas (src/mangaberri)
 
 ## Queue
 
@@ -53,9 +54,15 @@ with a doubled slash after the host.
 - skydemonorder.com — Livewire, Cloudflare-gated (renders fine in Camoufox); check whether it runs the same `pages::search` component before writing anything new
 - storyseedling.com — Livewire, `/series/<numericId>/<chapter>`, search is Livewire-only
 
-### "mangaberri" engine (one base, two children)
+### "mangaberri" engine — done as src/mangaberri
 
-- mangamikan.com, readmanhwas.com — shared assets (`/assets/app.css`, `mangaberri-overdrive.css`); both stall under plain curl but render fine in Camoufox
+Shape: `/manga?page=N`, `/latest`, `/ongoing`, `/completed`, `/genre/<slug>`,
+`/search?q=`, series at `/title/<slug>`, reader at `/read/<id>`, pages at
+`/mangas/<chapterId>/pNNNN_<hash>.webp`. Chapter rows are
+`a[data-chapter-row][data-chapter-id][data-created-at]`. The two skins place the
+cover inside the series link on some rails and beside it on others, and a reader
+page also carries other chapters' covers — both handled in the parser. The
+earlier "origin stalls under curl" note was transient; plain curl works.
 
 ### Next.js / RSC
 
