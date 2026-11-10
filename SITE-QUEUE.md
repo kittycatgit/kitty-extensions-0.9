@@ -12,7 +12,7 @@ ErisScans, WriterScans, GrimScans, KewnScans, MistScans (src/meowing) ·
 NyxScans, KenComics (src/vcomics) · KeroScans, DesireScans (src/kero) ·
 RitharScans, ArtLapsa, KitsuneDawn (src/lwcomics) ·
 AquaReader, ArenaScans, LinkManga (Madara with custom skins) ·
-MangaMikan, ReadManhwas (src/mangaberri) · RenaScans, FroPi, NuviaToon, ManhwaH
+MangaMikan, ReadManhwas (src/mangaberri) · RenaScans, FroPi, NuviaToon, ManhwaH, ReadNovel
 
 ## Queue
 
@@ -70,7 +70,7 @@ earlier "origin stalls under curl" note was transient; plain curl works.
 - philiascans.org — `/series/<slug>`, reader `/read/<opaque-token>?lang=en`. The flight payload holds no chapter list and the app calls `/api/v1/internal/bot-verify`, so expect a gate in front of the data; fingerprint that endpoint before writing anything.
 - manhuatop.org — `/series/?sort=`, `/manhua/<slug>/chapter-<n>`, `/api/auth/session`; Cloudflare-gated
 - oriyami.com — `/manga|/manhwa|/manhua/<slug>`, chapters in the flight payload, `/library?q=`
-- komix.to — `/title/<slug>`, `/api/page-data/home`, `/browse`
+- komix.to — **parked, needs a decoder.** Everything else is easy: `/api/page-data/browse?page=&sort=&genre=` over 25,500 titles (sort=rating differs, views/latest/updated are one order), `/api/search?q=`, `/api/page-data/title/<slug>` with the chapter list, covers at `/api/images?path=`. But page records come back with `image_url: ""` and an `enc` blob, and the synopsis likewise as `descriptionEnc`, i.e. the same per-field encryption comix.to uses — see the private comix-extension's crypto.ts. Finishing it means pulling this site's key material out of its apicore chunk.
 - schalescans.com — **check before building**: its chapter records carry `mangadex_id` and `primary_url: https://mangadex.org/chapter/<uuid>`, so the site is largely an index over MangaDex rather than its own library. Worth deciding whether it adds anything over the MangaDex source.
 - lunarx.to — Next.js shell over `api.lunarx.to` (`/api/...`)
 - hangulplanet.com — `/novel/<slug>`, `?cpage=` chapter paging
@@ -78,7 +78,7 @@ earlier "origin stalls under curl" note was transient; plain curl works.
 - woopread.com — `/series/<slug>`, `/search?q=`
 - lotusscribe.com — `/novel/<slug>/<id>-<title>`, homepage is the full index
 - wetriedtls.com — `/series/<slug>`, chapter list client-rendered, `api.wetriedtls.com`
-- readnovel.eu — canonical host for wuxiaworld.eu and wuxia.click (one extension covers all three): `/novel/<slug>`, `/chapter/<slug>-<n>`
+- readnovel.eu — done. The same pages-router app also answers on wuxiaworld.eu and wuxia.click (its payload names the site), so those two need no extension of their own. Data is all in `__NEXT_DATA__`: `/browse?page=&genre=&status=&sort=` (sort of popular|views|latest|new|rating|chapters), title search only at `/search/<query>`, the table of contents a hundred at a time via `?page=`, chapter text as a `paragraphs` array, covers at `cdn.wuxiaworld.eu/<coverKey>-240.webp` with some novels carrying no cover at all.
 
 ### JSON APIs
 
