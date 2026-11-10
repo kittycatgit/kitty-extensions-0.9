@@ -9,6 +9,7 @@ import {
   type FormSectionElement,
 } from "@paperback/types";
 
+import { encodeId } from "../shared/ids";
 import type { MeowingFilters } from "./models";
 
 export class MeowingSearchForm extends AdvancedSearchForm {
@@ -44,7 +45,7 @@ export class MeowingSearchForm extends AdvancedSearchForm {
           title: "Genres",
           layout: "list",
           value: this.genres,
-          items: this.allGenres.map((genre) => ({ id: genre, title: genre })),
+          items: this.allGenres.map((genre) => ({ id: encodeId(genre), title: genre })),
           minItemCount: 0,
           maxItemCount: Math.max(this.allGenres.length, 1),
           onValueChange: closureSelector(this, "genres", async (value: string[]) => {

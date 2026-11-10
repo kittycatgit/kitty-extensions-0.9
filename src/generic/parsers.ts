@@ -51,19 +51,34 @@ export class MadaraParser {
     const artist: string = Application.decodeHTMLEntities(
       $("div.artist-content").first().text().replace("\\n", "").trim(),
     ).replace("Updating", "");
-    const synopsis: string = Application.decodeHTMLEntities(
-      $("div.description-summary, div.summary-container, div.manga-excerpt").first().text(),
-    )
+    const summary = $("div.description-summary, div.summary-container, div.manga-excerpt")
+      .first()
+      .clone();
+    summary.find("script, style, h1, h2, h3, .code-block, .c-content-readmore, ins").remove();
+
+    const synopsis: string = Application.decodeHTMLEntities(summary.text())
       .replace("Show more", "")
+      // Themes append their own blurb under the description; it starts at the
+      // site's "same genre" link and is not part of the series.
+      .replace(/\s*(Search for series of same genre\(s\)|Welcome to [^.]{0,60}site)[\s\S]*$/i, "")
       .trim();
 
     const shareUrl: string = `${source.domain}/${await source.getDirectoryPath()}/${mangaId}`;
 
     const rating: number = (Number($("#averagerate").text().trim()) || 0) / 10;
 
-    const image: string = encodeURI(
-      await this.getImageSrc($("div.summary_image img").first(), source),
-    );
+    // The series page's own cover is the full-size upload; `summary_image`
+    // carries the listing thumbnail, which the app would then show at full size.
+    const ogImage = $('meta[property="og:image"]').attr("content")?.trim() ?? "";
+    const seriesImage = (
+      await this.getImageSrc($("div.summary_image img").first(), source)
+    ).replace(/-\d+x\d+(?=\.[a-z]{3,4}(?:$|\?))/i, "");
+    // A Jetpack url carries its size in the query, where stripping the filename
+    // suffix changes nothing; there the og:image is the larger one.
+    const image: string =
+      !seriesImage || (/[?&](resize|fit)=/i.test(seriesImage) && ogImage.includes("/uploads/"))
+        ? normaliseUrl(Application.decodeHTMLEntities(ogImage))
+        : seriesImage;
     const parsedStatus: string = $("div.summary-content", $("div.post-content_item").last())
       .text()
       .trim();
@@ -190,7 +205,7 @@ export class MadaraParser {
         );
         continue;
       }
-      pages.push(encodeURI(page));
+      pages.push(page);
     }
 
     return {
@@ -227,7 +242,7 @@ export class MadaraParser {
     const pages: string[] = [];
 
     chapterList.forEach((page: string) => {
-      pages.push(encodeURI(page));
+      pages.push(page);
     });
 
     return {
@@ -245,7 +260,7 @@ export class MadaraParser {
     const items: DiscoverSectionItem[] = [];
 
     for (const obj of $("div.page-item-detail").toArray()) {
-      const image = encodeURI((await this.getImageSrc($("img", obj), source)) ?? "");
+      const image = (await this.getImageSrc($("img", obj), source)) ?? "";
       const title = $("a", $("h3.h5", obj)).last().text();
 
       const slug = this.idCleaner($("a", $("h3.h5", obj)).attr("href") ?? "");
@@ -323,7 +338,7 @@ export class MadaraParser {
       }
 
       const title: string = $("a", obj).attr("title") ?? "";
-      const image: string = encodeURI(await this.getImageSrc($("img", obj), source));
+      const image: string = await this.getImageSrc($("img", obj), source);
       const rating: string = $(source.searchRatingSelector, obj).text().trim() ?? "";
       const subtitle: string = $("span.font-meta.chapter", obj).text().trim();
 
@@ -400,7 +415,10 @@ export class MadaraParser {
     image = image?.replace(/http:\/\//g, "https://");
     image = image?.replace(/https:\/\/\//g, "https://");
 
-    return decodeURI(Application.decodeHTMLEntities(image ?? ""));
+    // Escapes already in the url (Jetpack's ?resize=110%2C150) must survive:
+    // encoding them again makes `%` into `%25` and the host serves the wrong
+    // size, or nothing at all.
+    return normaliseUrl(Application.decodeHTMLEntities(image ?? ""));
   }
 
   parseDate = (date: string): Date => {
@@ -442,4 +460,10 @@ export class MadaraParser {
     if (!cleanId) throw new Error(`Unable to parse id for ${str}`);
     return cleanId;
   }
+}
+
+// encodeURI escapes the characters a url may not carry raw, but it would also
+// turn the `%` of an escape already present into `%25`; those are put back.
+function normaliseUrl(raw: string): string {
+  return encodeURI(raw.trim()).replace(/%25([0-9A-Fa-f]{2})/g, "%$1");
 }

@@ -9,6 +9,7 @@ import {
   type FormSectionElement,
 } from "@paperback/types";
 
+import { encodeId } from "../shared/ids";
 import { STATUSES, TYPES, type RenaFilters } from "./models";
 
 export class RenaSearchForm extends AdvancedSearchForm {
@@ -35,7 +36,7 @@ export class RenaSearchForm extends AdvancedSearchForm {
           title: "Genres",
           layout: "list",
           value: this.genre,
-          items: this.genreOptions.map((genre) => ({ id: genre, title: genre })),
+          items: this.genreOptions.map((genre) => ({ id: encodeId(genre), title: genre })),
           minItemCount: 0,
           // The API filters on one genre at a time.
           maxItemCount: 1,

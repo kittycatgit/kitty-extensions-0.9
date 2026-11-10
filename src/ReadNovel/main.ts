@@ -44,7 +44,7 @@ interface PageProps {
   toc?: Toc;
   listing?: Listing;
   result?: Listing & { query?: string };
-  genres?: string[];
+  genres?: { slug: string; name: string }[];
   data?: {
     chapter?: { number: number; title: string; paragraphs?: string[] };
   };
@@ -146,7 +146,10 @@ class ReadNovelExtension implements ExtensionImpl<typeof pbconfig> {
   async getAdvancedSearchForm(query: SearchQuery<ReadNovelFilters>) {
     const props = await this.getProps("/browse");
 
-    return new ReadNovelSearchForm(query.metadata, props.genres ?? []);
+    return new ReadNovelSearchForm(
+      query.metadata,
+      (props.genres ?? []).map((genre) => ({ id: genre.slug, title: genre.name })),
+    );
   }
 
   async getSearchResults(

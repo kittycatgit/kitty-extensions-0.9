@@ -6,7 +6,7 @@ import { ContentRating, SourceIntents, type ExtensionInfo } from "@paperback/typ
 export default {
   name: "KnoxT",
   description: "Extension that pulls novels from knoxt.space.",
-  version: "5.0.0",
+  version: "6.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.ADULT,

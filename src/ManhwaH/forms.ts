@@ -12,13 +12,13 @@ import {
 import { STATUSES, type ManhwaHFilters } from "./models";
 
 export class ManhwaHSearchForm extends AdvancedSearchForm {
-  private readonly genreOptions: string[];
+  private readonly genreOptions: { id: string; title: string }[];
 
   private genre: string[];
 
   private status: string[];
 
-  constructor(filters: ManhwaHFilters | undefined, genres: string[]) {
+  constructor(filters: ManhwaHFilters | undefined, genres: { id: string; title: string }[]) {
     super();
     this.genreOptions = genres;
     this.genre = filters?.genre ? [filters.genre] : [];
@@ -32,7 +32,7 @@ export class ManhwaHSearchForm extends AdvancedSearchForm {
           title: "Genres",
           layout: "list",
           value: this.genre,
-          items: this.genreOptions.map((genre) => ({ id: genre, title: genre })),
+          items: this.genreOptions,
           minItemCount: 0,
           // The API filters on one genre at a time.
           maxItemCount: 1,

@@ -16,6 +16,7 @@ import {
   type SourceManga,
 } from "@paperback/types";
 
+import { encodeId } from "../shared/ids";
 import { ManhwaHSearchForm } from "./forms";
 import {
   LIMIT,
@@ -140,7 +141,16 @@ class ManhwaHExtension implements ExtensionImpl<typeof pbconfig> {
     const response = await this.getJson<ApiComic[]>(
       `/comics${this.query({ sort: "hot", limit: "50" })}`,
     );
-    const genres = [...new Set(response.data.flatMap((comic) => comic.genres ?? []))].sort();
+    const genres = [
+      ...new Map(
+        response.data
+          .flatMap((comic) => comic.genres ?? [])
+          .filter((genre) => genre.name)
+          .map((genre) => [genre.slug ?? genre.name, genre]),
+      ).values(),
+    ]
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map((genre) => ({ id: genre.slug ?? encodeId(genre.name), title: genre.name }));
 
     return new ManhwaHSearchForm(query.metadata, genres);
   }
@@ -217,7 +227,12 @@ class ManhwaHExtension implements ExtensionImpl<typeof pbconfig> {
                 {
                   id: "genres",
                   title: "Genres",
-                  tags: comic.genres.map((genre) => ({ id: genre, title: genre })),
+                  tags: comic.genres
+                    .filter((genre) => genre.name)
+                    .map((genre) => ({
+                      id: genre.slug ?? encodeId(genre.name),
+                      title: genre.name,
+                    })),
                 },
               ],
             }

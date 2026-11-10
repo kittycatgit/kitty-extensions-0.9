@@ -159,10 +159,9 @@ export abstract class MangaStreamGeneric implements ExtensionImpl<typeof basePbC
       .setQueryItem("page", page.toString());
 
     if (query?.title) {
-      urlBuilder = urlBuilder.setQueryItem(
-        "s",
-        encodeURIComponent(query?.title.replace(/[’–][a-z]*/g, "") ?? ""),
-      );
+      // setQueryItem percent-encodes what it is given, so encoding here too
+      // sent `s=My%2520Disciples` and the site matched nothing.
+      urlBuilder = urlBuilder.setQueryItem("s", query.title.replace(/[’–][a-z]*/g, ""));
     } else {
       // Genres go as repeated `genre[]` items and the rest as single values;
       // anything else answers with a server error instead of a listing.

@@ -9,7 +9,7 @@ const pbConfig = {
   ...basePbConfig,
   name: "RenaScans",
   description: "Extension that pulls content from renascans.net.",
-  version: "1.0.0",
+  version: "2.0.0",
   contentRating: ContentRating.MATURE as ContentRating,
   developers: [
     {

@@ -72,8 +72,19 @@ export class LightNovelParser extends MangaStreamParser {
       }
     });
 
+    // Inline ad scripts sit between the paragraphs, and .text() would read
+    // their bodies as prose; paragraphs also need their breaks kept.
+    const story = $("div.sersys, div.entry-content").first().clone();
+    story.find("script, style, ins, .code-block").remove();
+
+    const paragraphs = story
+      .find("p")
+      .toArray()
+      .map((node) => $(node).text().replace(/\s+/g, " ").trim())
+      .filter((text) => text.length > 0);
+
     const synopsis = Application.decodeHTMLEntities(
-      $("div.sersys, div.entry-content").first().text().replace(/\s+/g, " ").trim(),
+      paragraphs.length > 0 ? paragraphs.join("\n\n") : story.text().replace(/\s+/g, " ").trim(),
     );
 
     const rating = Number(

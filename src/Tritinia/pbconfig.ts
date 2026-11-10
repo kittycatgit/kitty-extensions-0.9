@@ -9,7 +9,7 @@ const pbConfig = {
   ...basePbConfig,
   name: "Tritinia",
   description: "Extension that pulls content from tritinia.org.",
-  version: "1.0.0",
+  version: "2.0.0",
   contentRating: ContentRating.ADULT as ContentRating,
   developers: [
     {

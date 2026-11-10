@@ -224,10 +224,25 @@ export abstract class KeroGeneric implements ExtensionImpl<typeof basePbConfig> 
   }
 
   async getChapters(sourceManga: SourceManga): Promise<Chapter[]> {
-    const payload = decodePayload(
-      await this.getText(`${this.domain}/${this.seriesPath}/${sourceManga.mangaId}`),
-    );
+    const base = `${this.domain}/${this.seriesPath}/${sourceManga.mangaId}`;
+    const payload = decodePayload(await this.getText(base));
     const parsed = parseChapterList(payload);
+
+    // The series page embeds only its first page of chapters, at most a hundred
+    // of them, and the newest are the ones that fall off the end.
+    const totalPages = parseTotalPages(payload);
+    const seen = new Set(parsed.map((chapter) => chapter.number));
+
+    for (let page = 2; page <= totalPages; page++) {
+      for (const chapter of parseChapterList(
+        decodePayload(await this.getText(`${base}?page=${page.toString()}`)),
+      )) {
+        if (!seen.has(chapter.number)) {
+          seen.add(chapter.number);
+          parsed.push(chapter);
+        }
+      }
+    }
 
     if (parsed.length === 0) {
       throw new Error(`No chapters listed for ${sourceManga.mangaId}`);

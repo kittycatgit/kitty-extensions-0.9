@@ -12,13 +12,13 @@ import {
 import { STATUSES, type ReadNovelFilters } from "./models";
 
 export class ReadNovelSearchForm extends AdvancedSearchForm {
-  private readonly genreOptions: string[];
+  private readonly genreOptions: { id: string; title: string }[];
 
   private genre: string[];
 
   private status: string[];
 
-  constructor(filters: ReadNovelFilters | undefined, genres: string[]) {
+  constructor(filters: ReadNovelFilters | undefined, genres: { id: string; title: string }[]) {
     super();
     this.genreOptions = genres;
     this.genre = filters?.genre ? [filters.genre] : [];
@@ -32,7 +32,7 @@ export class ReadNovelSearchForm extends AdvancedSearchForm {
           title: "Genres",
           layout: "list",
           value: this.genre,
-          items: this.genreOptions.map((genre) => ({ id: genre, title: genre })),
+          items: this.genreOptions,
           minItemCount: 0,
           // The API filters on one genre at a time.
           maxItemCount: 1,

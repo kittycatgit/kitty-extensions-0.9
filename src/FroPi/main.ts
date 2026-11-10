@@ -16,6 +16,7 @@ import {
   type SourceManga,
 } from "@paperback/types";
 
+import { encodeId } from "../shared/ids";
 import { FroPiSearchForm } from "./forms";
 import {
   LIMIT,
@@ -153,7 +154,7 @@ class FroPiExtension implements ExtensionImpl<typeof pbconfig> {
       q: (query.title ?? "").trim(),
       // Singular and case-sensitive: `genres=` or a lowercased value is
       // accepted and then ignored.
-      genre: filters.genre ?? "",
+      genre: filters.genre ? decodeURIComponent(filters.genre) : "",
       status: filters.status ?? "",
       type: filters.type ?? "",
       sort: sortingOption?.id ?? filters.sort ?? "",
@@ -176,8 +177,9 @@ class FroPiExtension implements ExtensionImpl<typeof pbconfig> {
       ...(series.ageRating ? { "Age rating": series.ageRating.replaceAll("_", " ") } : {}),
     };
 
+    // A display name is not a legal id: a space fails the whole mangaInfo.
     const tags = [...(series.genres ?? []), ...(series.tags ?? [])].map((tag) => ({
-      id: tag,
+      id: encodeId(tag),
       title: tag,
     }));
 

@@ -264,7 +264,15 @@ function synopsisOf($: cheerio.CheerioAPI): string {
     if (text) lines.push(text);
   });
 
-  return lines.length > 0 ? lines.join("\n") : clean(content.text());
+  // The page prints its ko-fi and paypal banners as escaped markup inside the
+  // entry text, so removing the <img> nodes does not reach them.
+  return (lines.length > 0 ? lines.join("\n") : clean(content.text()))
+    .replace(/<[^>]+>/g, " ")
+    .split("\n")
+    .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
+    .filter((line) => line.length > 0)
+    .join("\n")
+    .trim();
 }
 
 export function parseSeries($: cheerio.CheerioAPI): Series {

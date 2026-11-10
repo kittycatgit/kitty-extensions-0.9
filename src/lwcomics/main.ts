@@ -19,6 +19,7 @@ import {
 } from "@paperback/types";
 import * as cheerio from "cheerio";
 
+import { encodeId } from "../shared/ids";
 import type { basePbConfig } from "./config";
 import { LwSearchForm } from "./forms";
 import { SORTS, type LwCard, type LwFilters, type LwMetadata } from "./models";
@@ -300,7 +301,7 @@ export abstract class LwComicsGeneric implements ExtensionImpl<typeof basePbConf
                 {
                   id: "genres",
                   title: "Genres",
-                  tags: page.genres.map((genre) => ({ id: genre, title: genre })),
+                  tags: page.genres.map((genre) => ({ id: encodeId(genre), title: genre })),
                 },
               ],
             }

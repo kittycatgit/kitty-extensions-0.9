@@ -77,10 +77,7 @@ export function parseSeriesPage($: CheerioAPI): {
       $('meta[property="og:title"]').attr("content") ?? $("h1").first().text().trim(),
     ),
     imageUrl: $('meta[property="og:image"]').attr("content") ?? "",
-    synopsis: Application.decodeHTMLEntities(
-      $("#expand_content").first().text().replace(/\s+/g, " ").trim() ||
-        ($('meta[name="description"]').attr("content") ?? ""),
-    ),
+    synopsis: Application.decodeHTMLEntities(synopsisOf($)),
     ...(labelled("Author") ? { author: labelled("Author")! } : {}),
     ...(labelled("Artist") ? { artist: labelled("Artist")! } : {}),
   };
@@ -178,4 +175,32 @@ function parseDate(value: string): Date | undefined {
   const parsed = new Date(text);
 
   return isNaN(parsed.getTime()) ? undefined : parsed;
+}
+
+// The synopsis is one pre-wrap paragraph; its <br> breaks are real paragraph
+// breaks that .text() would drop, and anything else inside #expand_content is
+// the "Alternative titles" block, which is not part of the description.
+function synopsisOf($: CheerioAPI): string {
+  for (const node of [$("#expand_content p").first(), $('p[style*="pre-wrap"]').first()]) {
+    if (node.length === 0) {
+      continue;
+    }
+
+    node.find("br").replaceWith("\n");
+    const text = node
+      .text()
+      .split("\n")
+      .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+
+    if (text.length > 0) {
+      return text;
+    }
+  }
+
+  // A title with no synopsis block has none; the meta tag here is the site
+  // tagline and the title, which is not a description.
+  return "";
 }

@@ -179,7 +179,9 @@ export class MangaStreamParser {
       );
     }
 
-    const scriptMatch = readerScript.html()?.match(/ts_reader\.run\((.*?(?=\);|},))/);
+    // A chapter served from two mirrors has a `},` between the entries, which a
+    // lazy match cuts the object in half on.
+    const scriptMatch = readerScript.html()?.match(/ts_reader\.run\(\s*(\{[\s\S]*?\})\s*\)\s*;/);
 
     interface obj {
       sources: {
@@ -200,19 +202,18 @@ export class MangaStreamParser {
       throw new Error(`Failed to parse script for manga ${chapter.sourceManga.mangaId}`);
     }
 
-    if (!scriptStr.endsWith("}")) {
-      scriptStr = scriptStr + "}";
-    }
-
     scriptObj = JSON.parse(scriptStr) as obj;
 
     if (!scriptObj?.sources) {
       throw new Error(`Failed for find sources property for manga ${chapter.sourceManga.mangaId}`);
     }
 
-    for (const index of scriptObj.sources) {
-      if (index?.images.length == 0) continue;
-      index.images.map((p: string) => pages.push(encodeURI(p.trim())));
+    // Each source is one mirror of the same chapter, so only the first is read;
+    // every mirror would otherwise be appended to the same page list.
+    const images = scriptObj.sources.find((source) => source?.images.length > 0)?.images ?? [];
+
+    for (const image of images) {
+      pages.push(encodeURI(image.trim()));
     }
 
     const chapterDetails = {

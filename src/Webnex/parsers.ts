@@ -15,7 +15,7 @@ import { CHAPTERS_PER_PAGE, DOMAIN, seriesUrl } from "./models";
 
 // An empty imageUrl empties the whole row, so point coverless titles at a path
 // the host will not serve and let the app draw its placeholder.
-const MISSING_COVER = `${DOMAIN}/cover/none.webp`;
+const MISSING_COVER = `${DOMAIN}/apple-icon.png`;
 
 // Genre and tag names carry spaces and apostrophes, which ids may not; percent
 // encoding is reversible and only uses characters the bridge accepts.
@@ -159,7 +159,29 @@ function ratingOf(label: string, tags: string[]): ContentRating {
   return ContentRating.EVERYONE;
 }
 
-export function parseSeries($: CheerioAPI, mangaId: string): SourceManga {
+// The series hero is rendered from the streamed flight payload, so its cover
+// never reaches the markup cheerio is given.
+function coverFromPayload(html: string): string {
+  let payload = "";
+
+  for (const match of html.matchAll(/self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)/g)) {
+    try {
+      payload += JSON.parse(match[1]!) as string;
+    } catch {
+      // A chunk that is not a string holds no markup.
+    }
+  }
+
+  // The hero's own props carry a `fallbackSrc` between the two keys, so the
+  // match runs to the className without leaving the object.
+  return (
+    /"src":"(https:\/\/images\.webnex\.cc\/catalog\/v1\/covers\/[^"]+)"[^}]*"className":"cover-img"/.exec(
+      payload,
+    )?.[1] ?? ""
+  );
+}
+
+export function parseSeries($: CheerioAPI, mangaId: string, html = ""): SourceManga {
   const title = text($("h1.series-title").first());
 
   if (!title) {
@@ -230,7 +252,8 @@ export function parseSeries($: CheerioAPI, mangaId: string): SourceManga {
     tagGroups.push({ id: "tags", title: "Tags", tags });
   }
 
-  const thumbnail = ($("div.series-cover img").first().attr("src") ?? "").trim();
+  const thumbnail =
+    ($("div.series-cover img").first().attr("src") ?? "").trim() || coverFromPayload(html);
   const additionalInfo: Record<string, string> = {};
 
   for (const [key, value] of [

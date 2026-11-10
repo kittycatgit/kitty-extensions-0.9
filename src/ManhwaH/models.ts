@@ -22,8 +22,14 @@ export interface ApiComic {
   type?: string;
   rating?: number | string;
   total_views?: number;
-  genres?: string[];
+  genres?: ApiGenre[];
   chapters?: ApiChapter[];
+}
+
+export interface ApiGenre {
+  id?: string;
+  name: string;
+  slug?: string;
 }
 
 export interface ApiChapter {

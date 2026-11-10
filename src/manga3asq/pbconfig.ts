@@ -11,7 +11,7 @@ const pbConfig = {
   ...basePbConfig,
   name: "manga3asq",
   description: "Extension that pulls content from 3asq.online.",
-  version: "1.0.0",
+  version: "2.0.0",
   language: "ar",
   contentRating: ContentRating.MATURE as ContentRating,
   developers: [

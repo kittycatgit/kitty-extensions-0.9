@@ -16,6 +16,7 @@ import {
 } from "@paperback/types";
 import * as cheerio from "cheerio";
 
+import { encodeId } from "../shared/ids";
 import type { basePbConfig } from "./config";
 import { MeowingSearchForm } from "./forms";
 import {
@@ -175,7 +176,9 @@ export abstract class MeowingGeneric implements ExtensionImpl<typeof basePbConfi
       const wanted = filters.genres ?? [];
 
       return wanted.every((genre) =>
-        entry.tags.some((tag) => tag.toLowerCase() === genre.toLowerCase()),
+        entry.tags.some(
+          (tag) => tag.trim().toLowerCase() === decodeURIComponent(genre).trim().toLowerCase(),
+        ),
       );
     });
 
@@ -201,7 +204,11 @@ export abstract class MeowingGeneric implements ExtensionImpl<typeof basePbConfi
     const page = parseSeriesPage($);
     const entry = (await this.catalog()).find((candidate) => candidate.id === mangaId);
 
-    const tags = (entry?.tags ?? []).map((tag) => ({ id: tag, title: tag }));
+    // A display name is not a legal id: a space fails the whole mangaInfo object,
+    // and these names carry spaces, stray padding and non-latin text.
+    const tags = [
+      ...new Set((entry?.tags ?? []).map((tag) => tag.trim()).filter((tag) => tag.length > 0)),
+    ].map((tag) => ({ id: encodeId(tag), title: tag }));
 
     return {
       mangaId,

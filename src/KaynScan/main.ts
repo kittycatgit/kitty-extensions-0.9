@@ -18,6 +18,7 @@ import {
   type SourceManga,
 } from "@paperback/types";
 
+import { encodeId } from "../shared/ids";
 import { KaynSearchForm } from "./forms";
 import {
   API,
@@ -224,7 +225,10 @@ class KaynScanExtension implements ExtensionImpl<typeof pbconfig> {
                 {
                   id: "genres",
                   title: "Genres",
-                  tags: book.genres.map((genre) => ({ id: genre.toLowerCase(), title: genre })),
+                  tags: book.genres.map((genre) => ({
+                    id: encodeId(genre.toLowerCase()),
+                    title: genre,
+                  })),
                 },
               ],
             }

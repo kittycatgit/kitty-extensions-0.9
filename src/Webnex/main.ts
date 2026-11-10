@@ -69,13 +69,19 @@ class WebnexExtension implements ExtensionImpl<typeof pbconfig> {
   }
 
   private async document(url: string): Promise<cheerio.CheerioAPI> {
+    return cheerio.load(await this.markup(url));
+  }
+
+  private async markup(url: string): Promise<string> {
     const [, buffer] = await Application.scheduleRequest({ url, method: "GET" });
 
-    return cheerio.load(Application.arrayBufferToUTF8String(buffer));
+    return Application.arrayBufferToUTF8String(buffer);
   }
 
   async getMangaDetails(mangaId: string): Promise<SourceManga> {
-    return parseSeries(await this.document(seriesUrl(mangaId)), mangaId);
+    const html = await this.markup(seriesUrl(mangaId));
+
+    return parseSeries(cheerio.load(html), mangaId, html);
   }
 
   // Fifty rows per page; past the end the site repeats the last page.

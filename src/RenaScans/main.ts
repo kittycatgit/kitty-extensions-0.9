@@ -15,6 +15,7 @@ import {
   type SourceManga,
 } from "@paperback/types";
 
+import { encodeId } from "../shared/ids";
 import { RenaSearchForm } from "./forms";
 import {
   BATCH,
@@ -134,7 +135,9 @@ class RenaScansExtension implements ExtensionImpl<typeof pbconfig> {
     const list = await this.getJson<ApiListItem[]>(
       `/manga${this.query({
         q: (query.title ?? "").trim(),
-        genre: filters.genre ?? "",
+        // The picker carries encoded ids so the app accepts them; the site
+        // wants the plain name back.
+        genre: filters.genre ? decodeURIComponent(filters.genre) : "",
         status: filters.status ?? "",
         type: filters.type ?? "",
         ...(offset ? { offset: offset.toString() } : {}),
@@ -186,7 +189,7 @@ class RenaScansExtension implements ExtensionImpl<typeof pbconfig> {
                 {
                   id: "genres",
                   title: "Genres",
-                  tags: detail.genres.map((genre) => ({ id: genre, title: genre })),
+                  tags: detail.genres.map((genre) => ({ id: encodeId(genre), title: genre })),
                 },
               ],
             }

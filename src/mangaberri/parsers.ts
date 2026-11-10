@@ -96,12 +96,16 @@ export function parseSeries(
     }
   });
 
+  // The story block wraps headings, stats and a "read first chapter" link
+  // around the real text, so the prose element itself is read, not the wrapper.
   const synopsis =
-    $("[class*='story'], [class*='synopsis'], [class*='about']")
-      .first()
-      .text()
-      .replace(/\s+/g, " ")
-      .trim() || meta("description");
+    [
+      $("p.collection-synopsis").first(),
+      $("[class*='story'] > div").last(),
+      $("[class*='synopsis'], [class*='about']").first(),
+    ]
+      .map((node) => node.text().replace(/\s+/g, " ").trim())
+      .find((text) => text.length > 40) ?? meta("description");
 
   const status = /\b(ongoing|completed|hiatus|dropped)\b/i.exec($("body").text())?.[1];
   const rating = Number(/([\d.]+)/.exec(stats.get("reader rating") ?? "")?.[1] ?? NaN);
@@ -169,7 +173,12 @@ export function parseChapters(
 // A reader page also carries covers of other chapters, so only files under this
 // chapter's own folder count, ordered by the page number in the file name.
 export function parsePages(html: string, chapterId: string, domain: string): string[] {
-  const pattern = new RegExp(`/mangas/${chapterId}/p(\\d+)_[A-Za-z0-9]+\\.[a-z]{3,4}`, "g");
+  // Three naming schemes are in use: p0001_hfrughwl.webp on recent uploads,
+  // p0001.webp and plain 0001.webp on older ones.
+  const pattern = new RegExp(
+    `/mangas/${chapterId}/p?(\\d+)(?:_[A-Za-z0-9]+)?\\.(?:webp|jpe?g|png|avif|gif)`,
+    "g",
+  );
   const pages = new Map<number, string>();
 
   for (const match of html.matchAll(pattern)) {

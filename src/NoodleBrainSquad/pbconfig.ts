@@ -9,7 +9,7 @@ const pbConfig = {
   ...basePbConfig,
   name: "NoodleBrainSquad",
   description: "Extension that pulls content from noodlebrainsquad.org.",
-  version: "1.0.0",
+  version: "2.0.0",
   contentRating: ContentRating.MATURE as ContentRating,
   developers: [
     {
