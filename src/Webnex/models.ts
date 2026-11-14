@@ -20,9 +20,6 @@ export const CHAPTERS_PER_PAGE = 50;
 
 export const SEEN_LIMIT = 360;
 
-// Next.js server action the filter panel calls for the genre and tag lists.
-export const TAXONOMY_ACTION = "00e6c8a31fab7f595154855a5f303208d861493c64";
-
 export type TriState = Record<string, "included" | "excluded">;
 
 export type WebnexMetadata = {

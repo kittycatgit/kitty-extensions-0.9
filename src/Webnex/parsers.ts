@@ -159,9 +159,8 @@ function ratingOf(label: string, tags: string[]): ContentRating {
   return ContentRating.EVERYONE;
 }
 
-// The series hero is rendered from the streamed flight payload, so its cover
-// never reaches the markup cheerio is given.
-function coverFromPayload(html: string): string {
+// Everything the page streams after the first flush, as one decoded string.
+function flightPayload(html: string): string {
   let payload = "";
 
   for (const match of html.matchAll(/self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)/g)) {
@@ -172,13 +171,24 @@ function coverFromPayload(html: string): string {
     }
   }
 
-  // The hero's own props carry a `fallbackSrc` between the two keys, so the
-  // match runs to the className without leaving the object.
-  return (
-    /"src":"(https:\/\/images\.webnex\.cc\/catalog\/v1\/covers\/[^"]+)"[^}]*"className":"cover-img"/.exec(
+  return payload;
+}
+
+// The details panel prints a dozen tags and keeps the rest behind "+N more";
+// the full lists are the panel's props.
+function hiddenTags(payload: string): string[] {
+  const lists =
+    /"className":"detail-list","children":\[\["\$","\$L\w+",null,(\{"genres":\[[^\]]*\],"tags":\[[^\]]*\]\})/.exec(
       payload,
-    )?.[1] ?? ""
-  );
+    );
+
+  if (!lists) {
+    return [];
+  }
+
+  const { genres, tags } = JSON.parse(lists[1]!) as { genres: string[]; tags: string[] };
+
+  return [...genres, ...tags];
 }
 
 export function parseSeries($: CheerioAPI, mangaId: string, html = ""): SourceManga {
@@ -188,12 +198,10 @@ export function parseSeries($: CheerioAPI, mangaId: string, html = ""): SourceMa
     throw new Error(`webnex.cc returned no series page for ${mangaId}.`);
   }
 
-  const secondaryTitles = [
-    text($("p.series-native").first()),
-    ...$("details.series-more li")
-      .toArray()
-      .map((element) => text($(element))),
-  ].filter((name, index, all) => name && name !== title && all.indexOf(name) === index);
+  const secondaryTitles = $("span.series-alt-name")
+    .toArray()
+    .map((element) => text($(element)))
+    .filter((name, index, all) => name && name !== title && all.indexOf(name) === index);
 
   let author: string | undefined;
   let artist: string | undefined;
@@ -213,33 +221,39 @@ export function parseSeries($: CheerioAPI, mangaId: string, html = ""): SourceMa
     }
   }
 
-  const facts = $("p.series-facts").first();
-  const status = text(facts.find("span.fact-status"));
+  const facts = $("ul.series-badges").first();
+  const status = text(facts.find("li.series-badge.is-info"));
   const kind = text(facts.find('a[href*="kind="]'));
   const year = text(facts.find('a[href*="from="]'));
-  const ratingLabel =
-    facts
-      .find("span")
-      .toArray()
-      .map((element) => text($(element)))
-      .find((value) => /^(18\+|erotica|suggestive|safe)$/i.test(value)) ?? "";
-  const language = facts
-    .find("span")
+  const plain = facts
+    .find("li.series-badge:not(.is-info)")
     .toArray()
-    .map((element) => text($(element)))
-    .find((value) => value && value !== status && value !== ratingLabel && !/^(18\+)$/.test(value));
+    .map((element) => text($(element)));
+  const ratingLabel = plain.find((value) => /^(18\+|erotica|suggestive|safe)$/i.test(value)) ?? "";
+  const language = plain.find((value) => value && value !== ratingLabel);
 
   const genres: Tag[] = [];
   const tags: Tag[] = [];
-
-  for (const element of $("ul.tag-cloud a.chip").toArray()) {
-    const name = text($(element));
-    const href = $(element).attr("href") ?? "";
-    const list = /[?&]genre=/.test(href) ? genres : tags;
-
-    if (name && !list.some((tag) => tag.title === name)) {
+  const add = (list: Tag[], name: string): void => {
+    if (name && ![...genres, ...tags].some((tag) => tag.title === name)) {
       list.push({ id: idOf(name), title: name });
     }
+  };
+
+  for (const element of $("dl.detail-list a.chip").toArray()) {
+    const href = $(element).attr("href") ?? "";
+
+    if (/[?&]genre=/.test(href)) {
+      add(genres, text($(element)));
+    } else if (/[?&]tag=/.test(href)) {
+      add(tags, text($(element)));
+    }
+  }
+
+  const payload = flightPayload(html);
+
+  for (const name of hiddenTags(payload)) {
+    add(tags, name);
   }
 
   const tagGroups: TagSection[] = [];
@@ -252,15 +266,20 @@ export function parseSeries($: CheerioAPI, mangaId: string, html = ""): SourceMa
     tagGroups.push({ id: "tags", title: "Tags", tags });
   }
 
+  // A page that streams its hero carries the cover only in the payload.
   const thumbnail =
-    ($("div.series-cover img").first().attr("src") ?? "").trim() || coverFromPayload(html);
+    ($("header.series-top img.cover-img").first().attr("src") ?? "").trim() ||
+    (/"src":"(https:\/\/images\.webnex\.cc\/catalog\/v1\/covers\/[^"]+)"[^}]*"className":"cover-img"/.exec(
+      payload,
+    )?.[1] ??
+      "");
   const additionalInfo: Record<string, string> = {};
 
   for (const [key, value] of [
     ["Type", kind],
     ["Year", year],
     ["Language", language ?? ""],
-    ["Chapters", text($("dl.series-numbers dt:contains(Chapters) + dd").first())],
+    ["Chapters", text($("span.cover-chapters strong").first())],
   ]) {
     if (value) {
       additionalInfo[key!] = value;

@@ -30,7 +30,6 @@ import {
   SEEN_LIMIT,
   seriesUrl,
   SORTS,
-  TAXONOMY_ACTION,
   type Row,
   type WebnexMetadata,
 } from "./models";
@@ -135,8 +134,9 @@ class WebnexExtension implements ExtensionImpl<typeof pbconfig> {
   // chapter page sets, with that chapter page as referer.
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
     const chapterId = chapter.chapterId;
-    // The reader cookie is only issued to what looks like a page navigation.
-    const [response] = await Application.scheduleRequest({
+    // The reader page sets its cookie from an inline script, and only for
+    // what looks like a page navigation.
+    const [, page] = await Application.scheduleRequest({
       url: readUrl(chapterId),
       method: "GET",
       headers: {
@@ -146,10 +146,9 @@ class WebnexExtension implements ExtensionImpl<typeof pbconfig> {
         "sec-fetch-dest": "document",
       },
     });
-    const cookie = Object.entries(response.headers ?? {})
-      .filter(([name]) => name.toLowerCase() === "set-cookie")
-      .map(([, value]) => /wnx_reader=([^;,\s]+)/.exec(value)?.[1])
-      .find(Boolean);
+    const cookie = /<script data-wnx-reader>document\.cookie=\["([^"=]+)=([^"]+)"/.exec(
+      Application.arrayBufferToUTF8String(page),
+    );
 
     if (!cookie) {
       throw new Error(
@@ -169,7 +168,7 @@ class WebnexExtension implements ExtensionImpl<typeof pbconfig> {
         "sec-fetch-mode": "cors",
         "sec-fetch-dest": "empty",
       },
-      cookies: { wnx_reader: cookie },
+      cookies: { [cookie[1]!]: cookie[2]! },
     });
     const { pages, message } = parsePages(Application.arrayBufferToUTF8String(buffer));
 
@@ -269,23 +268,59 @@ class WebnexExtension implements ExtensionImpl<typeof pbconfig> {
     return this.paged(found, page, filters);
   }
 
+  // The filter panel loads its lists through a Next.js server action whose id
+  // changes with every site build, so the id is read from the page's scripts.
+  private async taxonomyAction(): Promise<string> {
+    const html = await this.markup(browseUrl());
+
+    for (const path of new Set(html.match(/\/_next\/static\/chunks\/[^"']+\.js/g) ?? [])) {
+      const id = /"([0-9a-f]{40,})",[^()]*"loadTaxonomy"/.exec(
+        await this.markup(`${DOMAIN}${path}`),
+      )?.[1];
+
+      if (id) {
+        Application.setState(id, "taxonomyAction");
+
+        return id;
+      }
+    }
+
+    throw new Error("webnex.cc no longer ships its genre list action.");
+  }
+
+  private async loadTaxonomy(action: string): Promise<Taxonomy | undefined> {
+    const [response, buffer] = await Application.scheduleRequest({
+      url: browseUrl(),
+      method: "POST",
+      headers: {
+        "next-action": action,
+        accept: "text/x-component",
+        "content-type": "text/plain;charset=UTF-8",
+      },
+      body: "[]",
+    });
+
+    // A retired id answers 409 "Server Action unavailable".
+    return response.status === 200
+      ? parseTaxonomy(Application.arrayBufferToUTF8String(buffer), TAXONOMY_LIMIT)
+      : undefined;
+  }
+
   private async taxonomy(): Promise<Taxonomy | undefined> {
     if (taxonomyCache && Date.now() - taxonomyCache.at < TAXONOMY_TTL_MS) {
       return taxonomyCache.taxonomy;
     }
 
     try {
-      const [, buffer] = await Application.scheduleRequest({
-        url: browseUrl(),
-        method: "POST",
-        headers: {
-          "next-action": TAXONOMY_ACTION,
-          accept: "text/x-component",
-          "content-type": "text/plain;charset=UTF-8",
-        },
-        body: "[]",
-      });
-      const taxonomy = parseTaxonomy(Application.arrayBufferToUTF8String(buffer), TAXONOMY_LIMIT);
+      const saved = Application.getState("taxonomyAction") as string | undefined;
+      const taxonomy =
+        (saved ? await this.loadTaxonomy(saved) : undefined) ??
+        (await this.loadTaxonomy(await this.taxonomyAction()));
+
+      if (!taxonomy) {
+        return taxonomyCache?.taxonomy;
+      }
+
       taxonomyCache = { at: Date.now(), taxonomy };
 
       return taxonomy;

@@ -7,7 +7,7 @@ import { ContentRating, SourceIntents } from "@paperback/types";
 export default {
   name: "Webnex",
   description: "Extension that pulls content from webnex.cc.",
-  version: "3.0.0",
+  version: "4.0.0",
   icon: "icon.png",
   language: "en",
   contentRating: ContentRating.ADULT,
