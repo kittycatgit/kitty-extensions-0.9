@@ -28,14 +28,95 @@ export function appScriptUrl(html: string): string {
   return match[1]!;
 }
 
-type Expression = { target: number; text: string };
+const PRECEDENCE: Record<string, number> = {
+  "|": 1,
+  "^": 2,
+  "&": 3,
+  "<<": 4,
+  ">>": 4,
+  ">>>": 4,
+  "+": 5,
+  "-": 5,
+  "*": 6,
+};
+
+// Integer expressions with JS precedence; `atom` resolves anything that is
+// not an operator or a bracket.
+function evaluate(text: string, atom: (token: string) => number): number {
+  const tokens = text.match(/>>>|<<|>>|[-+*^&|~()]|[\w$.]+(?:\[\d+\]|\(\d+\))?/g) ?? [];
+
+  if (tokens.join("") !== text.replace(/\s/g, "")) {
+    throw new Error(`Unreadable reader key expression: ${text}`);
+  }
+
+  let at = 0;
+
+  const primary = (): number => {
+    const token = tokens[at++];
+
+    if (token === undefined) {
+      throw new Error(`Truncated reader key expression: ${text}`);
+    }
+
+    if (token === "(") {
+      const value = binary(0);
+
+      if (tokens[at++] !== ")") {
+        throw new Error(`Unbalanced reader key expression: ${text}`);
+      }
+
+      return value;
+    }
+
+    if (token === "-") return -primary();
+    if (token === "~") return ~primary();
+
+    return atom(token);
+  };
+
+  const binary = (floor: number): number => {
+    let left = primary();
+
+    for (;;) {
+      const operator = tokens[at];
+      const rank = operator === undefined ? undefined : PRECEDENCE[operator];
+
+      if (operator === undefined || rank === undefined || rank <= floor) {
+        return left;
+      }
+
+      at++;
+      const right = binary(rank);
+
+      if (operator === "|") left |= right;
+      else if (operator === "^") left ^= right;
+      else if (operator === "&") left &= right;
+      else if (operator === "<<") left <<= right;
+      else if (operator === ">>") left >>= right;
+      else if (operator === ">>>") left >>>= right;
+      else if (operator === "+") left += right;
+      else if (operator === "-") left -= right;
+      else left *= right;
+    }
+  };
+
+  const value = binary(0);
+
+  if (at !== tokens.length) {
+    throw new Error(`Unreadable reader key expression: ${text}`);
+  }
+
+  return value;
+}
+
+const quoted = (name: string): string => name.replace(/\$/g, "\\$");
 
 // The key function is minified as a comma chain of 32 assignments like
-// `l[18]=(ue[58]-ue[105]-210^r.charCodeAt(3))&255`. The arithmetic only uses
-// + - ^ with ordinary JS precedence, so a tiny evaluator covers it.
+// `l[18]=(ue[58]-ue[105]-210^r.charCodeAt(3))&255` over a constant table and
+// the document's tag name.
 export function deriveKey(bundle: string): Uint8Array {
   const header =
-    /function \w*\(\)\{const (\w+)=new Uint8Array\(32\),(\w+)=document\.documentElement\.tagName;return /.exec(
+    /function [\w$]*\(\)\{(?:const|let|var) ([\w$]+)=new Uint8Array\(32\),([\w$]+)=document\.documentElement\.tagName;return /.exec(
       bundle,
     );
 
@@ -51,25 +132,26 @@ export function deriveKey(bundle: string): Uint8Array {
     throw new Error("The reader key function has an unexpected shape.");
   }
 
-  const expressions: Expression[] = [];
+  const assignments = bundle
+    .slice(start, end)
+    .split(new RegExp(`,(?=${quoted(out)}\\[\\d+\\]=)`))
+    .map((piece) => {
+      const match = new RegExp(`^${quoted(out)}\\[(\\d+)\\]=(.+)$`).exec(piece);
 
-  for (const piece of bundle.slice(start, end).split(new RegExp(`,(?=${out}\\[\\d+\\]=)`))) {
-    const match = new RegExp(`^${out}\\[(\\d+)\\]=(?:\\((.+)\\)|(.+))&255$`).exec(piece);
+      if (!match) {
+        throw new Error(`Unreadable reader key assignment: ${piece}`);
+      }
 
-    if (!match) {
-      throw new Error(`Unreadable reader key assignment: ${piece}`);
-    }
+      return { target: Number(match[1]), text: match[2]! };
+    });
 
-    expressions.push({ target: Number(match[1]), text: (match[2] ?? match[3])! });
+  if (assignments.length !== 32) {
+    throw new Error(`Expected 32 reader key assignments, found ${assignments.length}.`);
   }
 
-  if (expressions.length !== 32) {
-    throw new Error(`Expected 32 reader key assignments, found ${expressions.length}.`);
-  }
-
-  const tableName = /(\w+)\[\d+\]/.exec(expressions[0]!.text)?.[1];
+  const tableName = /([\w$]+)\[\d+\]/.exec(assignments[0]!.text)?.[1];
   const table = tableName
-    ? new RegExp(`[^\\w$]${tableName}=\\[([\\d,]+)\\]`).exec(bundle)?.[1]
+    ? new RegExp(`[^\\w$]${quoted(tableName)}=\\[([\\d,]+)\\]`).exec(bundle)?.[1]
     : undefined;
 
   if (!tableName || !table) {
@@ -79,17 +161,17 @@ export function deriveKey(bundle: string): Uint8Array {
   const constants = table.split(",").map(Number);
   const tagName = "HTML";
 
-  const operand = (token: string): number => {
-    const index = new RegExp(`^${tableName}\\[(\\d+)\\]$`).exec(token);
+  const atom = (token: string): number => {
+    const index = /^([\w$]+)\[(\d+)\]$/.exec(token);
 
-    if (index) {
-      return constants[Number(index[1])] ?? 0;
+    if (index && index[1] === tableName && Number(index[2]) < constants.length) {
+      return constants[Number(index[2])]!;
     }
 
-    const char = new RegExp(`^${tag}\\.charCodeAt\\((\\d+)\\)$`).exec(token);
+    const char = /^([\w$]+)\.charCodeAt\((\d+)\)$/.exec(token);
 
-    if (char) {
-      return tagName.charCodeAt(Number(char[1]));
+    if (char && char[1] === tag) {
+      return tagName.charCodeAt(Number(char[2]));
     }
 
     if (/^\d+$/.test(token)) {
@@ -101,22 +183,8 @@ export function deriveKey(bundle: string): Uint8Array {
 
   const key = new Uint8Array(32);
 
-  for (const expression of expressions) {
-    let value = 0;
-
-    for (const [i, segment] of expression.text.split("^").entries()) {
-      const tokens = segment.match(/[+-]|[^+-]+/g) ?? [];
-      let sum = operand(tokens[0]!.trim());
-
-      for (let j = 1; j + 1 < tokens.length; j += 2) {
-        const right = operand(tokens[j + 1]!.trim());
-        sum = tokens[j] === "+" ? sum + right : sum - right;
-      }
-
-      value = i === 0 ? sum : value ^ sum;
-    }
-
-    key[expression.target] = value & 255;
+  for (const assignment of assignments) {
+    key[assignment.target] = evaluate(assignment.text, atom) & 255;
   }
 
   return key;
