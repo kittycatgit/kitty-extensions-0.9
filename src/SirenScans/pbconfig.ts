@@ -1,27 +1,16 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Copyright © 2026 kittycatgit */
 
-import { ContentRating, SourceIntents, type ExtensionInfo } from "@paperback/types";
+import { ContentRating, type ExtensionInfo } from "@paperback/types";
 
-export default {
+import { basePbConfig } from "../siren/config";
+
+const pbConfig = {
+  ...basePbConfig,
   name: "SirenScans",
-  description: "Extension that pulls content from sirenscans.org.",
-  version: "5.0.0",
-  icon: "icon.png",
-  language: "en",
-  contentRating: ContentRating.MATURE,
-  badges: [],
-  developers: [
-    {
-      name: "kittycatgit",
-      website: "https://github.com/kittycatgit",
-      github: "https://github.com/kittycatgit",
-    },
-  ],
-  capabilities: [
-    SourceIntents.CHAPTER_PROVIDING,
-    SourceIntents.SEARCH_RESULT_PROVIDING,
-    SourceIntents.DISCOVER_SECTION_PROVIDING,
-    SourceIntents.CLOUDFLARE_BYPASS_PROVIDING,
-  ],
+  description: "Extension that pulls content from sirenscans.com.",
+  version: "6.0.0",
+  contentRating: ContentRating.MATURE as ContentRating,
 } satisfies ExtensionInfo;
+
+export default pbConfig;

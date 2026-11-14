@@ -3,12 +3,13 @@
 
 import { ContentRating, type ExtensionInfo } from "@paperback/types";
 
-import { basePbConfig } from "../meowing/config";
+import { basePbConfig } from "../siren/config";
 
 const pbConfig = {
   ...basePbConfig,
   name: "MistScans",
-  description: "Extension that pulls content from mistscans.com.",
+  description: "Extension that pulls content from mistscans.org.",
+  version: "3.0.0",
   contentRating: ContentRating.ADULT as ContentRating,
 } satisfies ExtensionInfo;
 

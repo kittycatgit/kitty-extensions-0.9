@@ -13,7 +13,7 @@ import {
 
 import { STATUSES, TYPES, type SirenSearchMetadata } from "./models";
 
-export class SirenScansSearchForm extends AdvancedSearchForm {
+export class SirenSearchForm extends AdvancedSearchForm {
   private readonly genres: Tag[];
 
   private tags: string[];

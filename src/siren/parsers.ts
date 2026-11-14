@@ -5,7 +5,6 @@ import * as cheerio from "cheerio";
 import type { AnyNode } from "domhandler";
 
 import {
-  DOMAIN,
   type SirenCard,
   type SirenChapterRow,
   type SirenHome,
@@ -48,7 +47,7 @@ export function slugOf(href: string | undefined): string {
     .split("/")[0]!;
 }
 
-export function absolute(url: string | undefined): string {
+export function absolute(url: string | undefined, domain: string): string {
   const value = (url ?? "").trim();
 
   if (!value || value.startsWith("data:")) {
@@ -58,12 +57,12 @@ export function absolute(url: string | undefined): string {
     return `https:${value}`;
   }
 
-  return value.startsWith("http") ? value : `${DOMAIN}${value.startsWith("/") ? "" : "/"}${value}`;
+  return value.startsWith("http") ? value : `${domain}${value.startsWith("/") ? "" : "/"}${value}`;
 }
 
 function coverOf($: cheerio.CheerioAPI, scope: cheerio.Cheerio<AnyNode>): string {
   const img = scope.find("img").first();
-  return absolute(img.attr("data-src") ?? img.attr("src"));
+  return (img.attr("data-src") ?? img.attr("src") ?? "").trim();
 }
 
 function ratingOf($: cheerio.CheerioAPI, scope: cheerio.Cheerio<AnyNode>) {
@@ -307,9 +306,11 @@ export function parseSeries(html: string): SirenSeries {
     }
   });
 
-  const cover = absolute(
-    $('meta[property="og:image"]').attr("content") ?? $("#cover-zoom-btn img").attr("data-src"),
-  );
+  const cover = (
+    $('meta[property="og:image"]').attr("content") ??
+    $("#cover-zoom-btn img").attr("data-src") ??
+    ""
+  ).trim();
 
   return {
     title,
@@ -379,7 +380,7 @@ export function parseChapterPages(html: string): string[] {
   const $ = cheerio.load(html);
 
   return $("#strip-reader img.reader-page")
-    .map((_, img) => absolute($(img).attr("src") ?? $(img).attr("data-src")))
+    .map((_, img) => ($(img).attr("src") ?? $(img).attr("data-src") ?? "").trim())
     .get()
     .filter(Boolean);
 }

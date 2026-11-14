@@ -3,8 +3,6 @@
 
 import type { SortingOption } from "@paperback/types";
 
-export const DOMAIN = "https://sirenscans.org";
-
 // Every JSON listing endpoint pages in steps of 20 cards.
 export const PAGE_SIZE = 20;
 

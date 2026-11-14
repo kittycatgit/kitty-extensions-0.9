@@ -8,7 +8,7 @@ import {
   type Response,
 } from "@paperback/types";
 
-export class SirenScansInterceptor extends PaperbackInterceptor {
+export class SirenInterceptor extends PaperbackInterceptor {
   private readonly domain: string;
 
   constructor(id: string, domain: string) {
