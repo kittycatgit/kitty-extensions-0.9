@@ -40,19 +40,20 @@ import { type CheerioAPI } from "cheerio";
 
 import { genreOptions } from "./genreOptions";
 import { genres } from "./genres";
-import { DOMAIN, MOBILE_DOMAIN, type Metadata } from "./models";
+import { DOMAIN, type Metadata } from "./models";
 
 // Covers come as plain http (or protocol-relative) from the markup; the app refuses plain http (ATS) and the CDN serves https.
 const httpsUrl = (u: string | undefined): string =>
   (u ?? "").replace(/^http:\/\//, "https://").replace(/^\/\//, "https://");
 import { MangaFoxInterceptor } from "./network";
 import type MangaFoxConfig from "./pbconfig";
+import { parseReaderCall, parseReaderPage } from "./reader";
 
 // Main extension class
 export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
   // Implementation of the main rate limiter
   mainRateLimiter = new BasicRateLimiter("main", {
-    numberOfRequests: 4,
+    numberOfRequests: 10,
     bufferInterval: 1,
     ignoreImages: true,
   });
@@ -591,30 +592,48 @@ export class MangaFoxExtension implements ExtensionImpl<typeof MangaFoxConfig> {
     return chapters.reverse();
   }
 
-  // The mobile "roll" reader lists every page of a chapter in one document (data-original on each img), where the
-  // desktop reader hands out two pages per scripted request: one request instead of a dozen, and no key dance.
-  // The desktop's page count is one higher than the image count: its last "page" is the end-of-chapter screen.
+  // The desktop reader is the one that serves every title: the mobile one answers "licensed and not available" for
+  // a good part of the catalogue. Long-strip chapters carry their pages in the document; the others hand them out
+  // two per call.
   async getChapterDetails(chapter: Chapter): Promise<ChapterDetails> {
-    const $ = await this.fetchCheerio({
-      url: `${MOBILE_DOMAIN}/roll_manga/${chapter.sourceManga.mangaId}/${chapter.chapterId}/1.html`,
-      method: "GET",
-    });
-    const pages: string[] = [];
-    $("img[data-original], .reader-main img, #viewer img").each((_, el) => {
-      const src = httpsUrl($(el).attr("data-original") ?? $(el).attr("src"));
-      if (/\/store\/manga\//.test(src) && !pages.includes(src)) pages.push(src);
-    });
-    if (pages.length === 0) {
+    const mangaId = chapter.sourceManga.mangaId;
+    const base = `${DOMAIN}/manga/${mangaId}/${chapter.chapterId}`;
+    const reader = parseReaderPage(await this.fetchText(`${base}/1.html`));
+    let pages = reader.pages;
+
+    if (!pages) {
+      if (!reader.chapterId || reader.count === 0) {
+        throw new Error(`MangaFox: no reader found for ${mangaId}/${chapter.chapterId}`);
+      }
+
+      const calls: Promise<string[]>[] = [];
+      for (let page = 1; page <= reader.count; page += 2) {
+        calls.push(
+          this.fetchText(`${base}/chapterfun.ashx?cid=${reader.chapterId}&page=${page}&key=`).then(
+            parseReaderCall,
+          ),
+        );
+      }
+      pages = (await Promise.all(calls)).flat();
+    }
+
+    if (pages.length < 2 || pages.length !== reader.count) {
       throw new Error(
-        `MangaFox: no pages found for ${chapter.sourceManga.mangaId}/${chapter.chapterId}`,
+        `MangaFox: ${mangaId}/${chapter.chapterId} printed ${pages.length} of ${reader.count} pages`,
       );
     }
 
     return {
       id: chapter.chapterId,
-      mangaId: chapter.sourceManga.mangaId,
-      pages,
+      mangaId,
+      // The reader's last page is its end-of-chapter screen.
+      pages: pages.slice(0, -1).map((page) => httpsUrl(page)),
     };
+  }
+
+  private async fetchText(url: string): Promise<string> {
+    const [, data] = await Application.scheduleRequest({ url, method: "GET" });
+    return Application.arrayBufferToUTF8String(data);
   }
 
   async fetchCheerio(request: Request): Promise<CheerioAPI> {
