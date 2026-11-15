@@ -14,7 +14,7 @@ export const MISSING_COVER = `${COVERS}/none.webp`;
 export const CLIENT_ID = "NYkivlMXotQixhHCmArAhyyrAEmiqHYu";
 // The sign-in page runs PKCE in Safari and hands back a login code; the
 // extension does the token exchange.
-export const REDIRECT_URI = "https://kittycatgit.github.io/kitty-extensions-0.9/oauth/comick/";
+export const REDIRECT_URI = "https://paperback.samipmainali.dev/kitty/oauth/comick/";
 export const RESOURCE = `${LIBRARY}`;
 export const TOKEN_URL = `${DOMAIN}/api/auth/oauth2/token`;
 export const REVOKE_URL = `${DOMAIN}/api/auth/oauth2/revoke`;
