@@ -35,6 +35,7 @@ Paperback 0.9 extensions.
 - [SilentQuill](https://www.silentquill.net)
 - [SirenScans](https://sirenscans.org)
 - [SoraRaw](https://soraraw.com) — Japanese
+- [Suwayomi](https://github.com/Suwayomi/Suwayomi-Server) — your own server
 - [TCB Scans](https://tcbonepiecechapters.com)
 - [ToonTop](https://toontop.io)
 - [Toonz](https://toonz.to)
