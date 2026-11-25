@@ -99,11 +99,12 @@ class MangaHubExtension implements ExtensionImpl<typeof pbconfigType> {
       throw new Error(`Chapter ${chapter.chapterId} is no longer listed for ${mangaId}`);
     }
 
-    // The page list arrives as AES-GCM ciphertext keyed to the request's access token.
+    // The page list is plain JSON while the site has encryption off, and AES-GCM
+    // ciphertext keyed to the request's access token while it has it on.
     const payload = data.chapter.pages;
     const pages = parseChapterPages({
       ...data.chapter,
-      pages: payload?.startsWith("enc:v1:") ? decryptEncV1(payload, keys) : payload,
+      pages: payload?.startsWith("enc:") ? decryptEncV1(payload, keys) : payload,
     });
 
     if (pages.length === 0) {

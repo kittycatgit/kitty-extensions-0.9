@@ -88,27 +88,48 @@ export class MangaHubApi {
   }
 
   /**
-   * Runs a chapter query, which the API answers with "Chapter encryption unavailable"
-   * unless the token it arrives on already holds a decryption key. Returns the keys
-   * the answer is encrypted with.
+   * Runs a chapter query. The site switches page-list encryption on and off: on,
+   * the API answers "Chapter encryption unavailable" until the token holds a key
+   * from /api/chapter-crypto and the page list arrives as `enc:v1:<keyId>:...`;
+   * off, that endpoint answers 503 chapter_crypto_disabled and the page list is
+   * plain JSON. So the query goes out first and a key is fetched only when the
+   * answer asks for one. Returns the keys the answer is encrypted with, if any.
    */
-  async queryChapter<T>(query: string): Promise<{ data: T; keys: Record<string, string> }> {
+  async queryChapter<T extends { chapter?: { pages?: string | null } }>(
+    query: string,
+  ): Promise<{ data: T; keys: Record<string, string> }> {
+    let session =
+      this.chapterKeys && this.chapterKeys.expiresAt > Date.now() + 30_000
+        ? this.chapterKeys
+        : null;
+
     for (let attempt = 0; ; attempt += 1) {
-      const session = await this.chapterSession();
+      let data: T;
 
       try {
-        return { data: await this.query<T>(query, session.token), keys: session.keys };
+        data = await this.query<T>(query, session?.token ?? this.token());
       } catch (error) {
         this.chapterKeys = null;
 
-        // A key the site has rotated away from reads as this, and a fresh one fixes it.
-        if (
-          attempt > 0 ||
-          !/chapter encryption/i.test(String((error as Error)?.message ?? error))
-        ) {
-          throw error;
+        // Encryption is on and this token holds no key (or one the site has rotated
+        // away from): a fresh key and a second try fix it.
+        if (attempt < 2 && /chapter encryption/i.test(String((error as Error)?.message ?? error))) {
+          session = await this.chapterSession();
+          continue;
         }
+
+        throw error;
       }
+
+      const keyId = encryptedKeyId(data.chapter?.pages);
+
+      if (keyId !== null && attempt < 2 && !session?.keys[keyId]) {
+        this.chapterKeys = null;
+        session = await this.chapterSession();
+        continue;
+      }
+
+      return { data, keys: session?.keys ?? {} };
     }
   }
 
@@ -160,6 +181,15 @@ export class MangaHubApi {
 
     return this.chapterKeys;
   }
+}
+
+/** The key id an `enc:<version>:<keyId>:...` page list names; null for a plain one. */
+function encryptedKeyId(pages: unknown): string | null {
+  if (typeof pages !== "string" || !pages.startsWith("enc:")) {
+    return null;
+  }
+
+  return pages.split(":")[2] ?? "";
 }
 
 export function gqlString(value: string): string {
